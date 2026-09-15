@@ -75,6 +75,23 @@ def _status_icon(status: str) -> str:
     return {"up": "\U0001F7E2", "down": "\U0001F534"}.get(status, "⚪")
 
 
+# تلگرام هر پیام را حداکثر ۴۰۹۶ کاراکتر قبول می‌کند — جای کافی برای
+# متن خطا هم می‌گذاریم
+_LOG_TAIL_LIMIT = 3000
+
+
+def _fmt_error_with_log(prefix: str, error: Optional[str], log: Optional[str]) -> str:
+    """پیام خطا + دنباله‌ی خروجی واقعی اسکریپت SSH (اگر باشد) را برای
+    ارسال در چت آماده می‌کند — دقیقاً همان چیزی که کاربر برای دیباگ
+    نصب/آپدیت/حذف از راه دور لازم دارد، بدون نیاز به journalctl."""
+    text = f"{prefix}: {html.escape(error or '-')}"
+    log = (log or "").strip()
+    if log:
+        tail = log[-_LOG_TAIL_LIMIT:]
+        text += f"\n\n<b>Log output:</b>\n<pre>{html.escape(tail)}</pre>"
+    return text
+
+
 async def _edit_or_send(update: Update, text: str, kb: Optional[InlineKeyboardMarkup] = None) -> None:
     query = update.callback_query
     if query:
@@ -319,7 +336,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             db.delete_server(server_id)
             await _edit_or_send(update, "\U0001F9E8 Agent uninstalled and server removed.", kb_servers())
         else:
-            await _edit_or_send(update, f"❌ Uninstall failed: {html.escape(result['error'] or '-')}", kb_server_detail(server))
+            await _edit_or_send(update, _fmt_error_with_log("❌ Uninstall failed", result["error"], result.get("log")), kb_server_detail(server))
 
     elif data == "settings:interval":
         await _edit_or_send(update, f"Current interval: <b>{scheduler.get_interval_minutes()} min</b>\nPick a new one:", kb_interval())
@@ -494,7 +511,7 @@ async def add_ssh_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         d["ip"], d["ssh_port"], d["ssh_username"], d.get("ssh_password"), d.get("ssh_private_key"),
     )
     if not result["ok"]:
-        await msg.edit_text(f"❌ Install failed: {html.escape(result['error'] or '-')}")
+        await msg.edit_text(_fmt_error_with_log("❌ Install failed", result["error"], result.get("log")), parse_mode=ParseMode.HTML)
         context.user_data.clear()
         return ConversationHandler.END
 

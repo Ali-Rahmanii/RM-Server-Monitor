@@ -331,7 +331,8 @@ function setDeployStatus(kind, html) {
         success: "bg-emerald-500/10 border-emerald-500/30 text-emerald-200",
         error: "bg-red-500/10 border-red-500/30 text-red-200",
     };
-    box.className = "text-xs rounded-lg p-3 border " + styles[kind];
+    // pre-wrap چون پیام خطا ممکن است شامل خروجی چندخطی اسکریپت SSH باشد
+    box.className = "text-xs rounded-lg p-3 border max-h-64 overflow-y-auto whitespace-pre-wrap font-mono " + styles[kind];
     box.innerHTML = html;
 }
 

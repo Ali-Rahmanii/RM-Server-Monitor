@@ -104,7 +104,8 @@ ensure_vnstat() {
     if ! command -v vnstat >/dev/null 2>&1; then
         log "نصب vnstat برای آمار کل ترافیک واقعی..."
         if command -v apt-get >/dev/null 2>&1; then
-            apt-get update -qq && apt-get install -y -qq vnstat
+            DEBIAN_FRONTEND=noninteractive apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq vnstat
         elif command -v dnf >/dev/null 2>&1; then
             dnf install -y -q vnstat
         elif command -v yum >/dev/null 2>&1; then
@@ -471,7 +472,9 @@ do_install() {
     check_root
     check_port_free
     ensure_python
-    ensure_vnstat
+    # vnstat کاملاً اختیاری است — هر مشکلی در نصبش (apt قفل، ریپازیتوری
+    # خراب، توزیع ناشناخته و ...) نباید کل نصب ایجنت را متوقف کند
+    ensure_vnstat || warn "راه‌اندازی vnstat ناموفق بود — بدون آن ادامه می‌دهیم (این ویژگی اختیاری است)."
     write_agent_files
     setup_venv_and_service "install"
 }
@@ -481,7 +484,7 @@ do_update() {
     log "شروع به‌روزرسانی ایجنت..."
     mkdir -p "${INSTALL_DIR}"
     ensure_python
-    ensure_vnstat
+    ensure_vnstat || warn "راه‌اندازی vnstat ناموفق بود — بدون آن ادامه می‌دهیم (این ویژگی اختیاری است)."
     write_agent_files
     setup_venv_and_service "update"
 }

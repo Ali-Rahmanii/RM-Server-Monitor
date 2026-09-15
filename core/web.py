@@ -62,6 +62,18 @@ class IntervalIn(BaseModel):
     minutes: int
 
 
+_LOG_TAIL_LIMIT = 3000
+
+
+def _fmt_error_with_log(error: str, log: Optional[str]) -> str:
+    """متن خطا + دنباله‌ی خروجی واقعی اسکریپت SSH را برای نمایش در
+    داشبورد آماده می‌کند — دقیقاً همان چیزی که برای دیباگ لازم است."""
+    log = (log or "").strip()
+    if not log:
+        return error
+    return f"{error}\n\n--- Log output ---\n{log[-_LOG_TAIL_LIMIT:]}"
+
+
 class SSHDeployIn(BaseModel):
     name: str
     ip: str
@@ -203,7 +215,7 @@ async def api_deploy(payload: SSHDeployIn, _=Depends(_check_auth)):
         payload.ssh_password, payload.ssh_private_key, payload.ssh_key_passphrase,
     )
     if not result["ok"]:
-        raise HTTPException(status_code=502, detail=result["error"] or "نصب ناموفق بود")
+        raise HTTPException(status_code=502, detail=_fmt_error_with_log(result["error"] or "نصب ناموفق بود", result.get("log")))
 
     server_id = db.add_server(
         payload.name, payload.ip, result["token"],
@@ -240,7 +252,7 @@ async def api_uninstall(server_id: int, payload: Optional[SSHCredsIn] = None, _=
         ssh_host, ssh_port, ssh_username, ssh_password, ssh_private_key, payload.ssh_key_passphrase,
     )
     if not result["ok"]:
-        raise HTTPException(status_code=502, detail=result["error"] or "حذف ناموفق بود")
+        raise HTTPException(status_code=502, detail=_fmt_error_with_log(result["error"] or "حذف ناموفق بود", result.get("log")))
 
     db.delete_server(server_id)
     return {"ok": True}
