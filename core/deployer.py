@@ -161,7 +161,11 @@ def deploy_agent_via_ssh(
     port_match = _PORT_RE.search(result["stdout"])
     status_match = _STATUS_RE.search(result["stdout"])
 
-    if not token_match or (status_match and status_match.group(1) != "OK"):
+    # اگر روی سرور هدف از قبل ایجنت نصب بوده، install.sh خودش به‌جای
+    # نصب از صفر به مسیر --update می‌رود (تا نیازی به --uninstall دستی
+    # نباشد) که STATUS=UPDATED چاپ می‌کند نه STATUS=OK — هر دو یعنی
+    # موفق، توکن معتبر برگشته.
+    if not token_match or (status_match and status_match.group(1) not in ("OK", "UPDATED")):
         return {
             "ok": False,
             "error": "نصب اجرا شد ولی توکن ایجنت در خروجی پیدا نشد — لاگ را بررسی کن.",
