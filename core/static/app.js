@@ -37,6 +37,14 @@ function fmtBps(v) {
     return `${v.toFixed(1)}${units[i]}`;
 }
 
+function fmtBytes(v) {
+    if (v == null) return "-";
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let i = 0;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return `${v.toFixed(1)}${units[i]}`;
+}
+
 Chart.defaults.color = "#94a3b8";
 Chart.defaults.font.family = "Vazirmatn, sans-serif";
 
@@ -94,6 +102,7 @@ function buildCardSkeleton(server) {
         <div class="gauges-row grid grid-cols-3 gap-2 justify-items-center"></div>
         <div class="down-msg hidden text-xs text-red-400 mt-2"></div>
         <div class="net-text text-[11px] text-slate-400 mt-3 flex justify-between"></div>
+        <div class="traffic-text text-[10px] text-slate-500 mt-1 hidden"></div>
     `;
     wrap.onclick = () => openDetail(cardInstances.get(server.id).server);
     return wrap;
@@ -147,10 +156,12 @@ function upsertCard(server) {
     const downMsg = inst.el.querySelector(".down-msg");
     const gaugesRow = inst.el.querySelector(".gauges-row");
     const netText = inst.el.querySelector(".net-text");
+    const trafficText = inst.el.querySelector(".traffic-text");
 
     if (status === "down") {
         gaugesRow.classList.add("hidden");
         netText.classList.add("hidden");
+        trafficText.classList.add("hidden");
         downMsg.classList.remove("hidden");
         downMsg.textContent = "🔴 قطع" + (latest?.error ? " — " + latest.error : "");
     } else {
@@ -164,6 +175,12 @@ function upsertCard(server) {
         inst.el.querySelector(".ram-val").textContent = latest?.ram_percent != null ? latest.ram_percent.toFixed(0) + "%" : "-";
         inst.el.querySelector(".disk-val").textContent = latest?.disk_percent != null ? latest.disk_percent.toFixed(0) + "%" : "-";
         netText.innerHTML = `<span>⬆ ${fmtBps(latest?.net_sent_bps)}</span><span>⬇ ${fmtBps(latest?.net_recv_bps)}</span>`;
+        if (latest?.traffic_rx_bytes != null) {
+            trafficText.classList.remove("hidden");
+            trafficText.textContent = `📡 کل ترافیک: ⬆ ${fmtBytes(latest.traffic_tx_bytes)} ⬇ ${fmtBytes(latest.traffic_rx_bytes)}`;
+        } else {
+            trafficText.classList.add("hidden");
+        }
     }
 }
 
@@ -354,8 +371,7 @@ deployForm.onsubmit = async (ev) => {
 const detailOverlay = el("detail-overlay");
 let detailOpenId = null;
 let detailTimer = null;
-let resourceChart = null;
-let networkChart = null;
+const charts = { cpu: null, ram: null, disk: null, network: null };
 const MAX_POINTS = 40;
 
 el("btn-detail-close").onclick = () => closeDetail();
@@ -365,8 +381,7 @@ function closeDetail() {
     if (detailTimer) clearInterval(detailTimer);
     detailTimer = null;
     detailOpenId = null;
-    if (resourceChart) { resourceChart.destroy(); resourceChart = null; }
-    if (networkChart) { networkChart.destroy(); networkChart = null; }
+    Object.keys(charts).forEach((k) => { if (charts[k]) { charts[k].destroy(); charts[k] = null; } });
 }
 
 function syncDetailHeader(server) {
@@ -375,17 +390,26 @@ function syncDetailHeader(server) {
     el("detail-sub").textContent = `${server.ip}:${server.port}${server.group_name ? " · " + server.group_name : ""}`;
 }
 
+function chartPanel(key, title, canvasId) {
+    return `
+        <div class="glass-panel p-4" id="panel-${key}">
+            <div class="flex items-center justify-between mb-2">
+                <div class="text-sm font-semibold pulse-live">${title}</div>
+                <button type="button" class="chart-toggle text-sm" data-chart="${key}" title="نمایش/مخفی">👁️</button>
+            </div>
+            <div class="chart-box" id="box-${key}"><canvas id="${canvasId}"></canvas></div>
+        </div>
+    `;
+}
+
 function detailBodyTemplate() {
     return `
+        <div id="traffic-total-banner" class="text-xs text-slate-400 mb-3 hidden"></div>
         <div class="grid sm:grid-cols-2 gap-4 mb-4">
-            <div class="glass-panel p-4">
-                <div class="text-sm font-semibold mb-2 pulse-live">CPU / RAM / دیسک (٪)</div>
-                <div class="chart-box"><canvas id="chart-resource"></canvas></div>
-            </div>
-            <div class="glass-panel p-4">
-                <div class="text-sm font-semibold mb-2 pulse-live">ترافیک شبکه</div>
-                <div class="chart-box"><canvas id="chart-network"></canvas></div>
-            </div>
+            ${chartPanel("cpu", "CPU (٪)", "chart-cpu")}
+            ${chartPanel("ram", "RAM (٪)", "chart-ram")}
+            ${chartPanel("disk", "دیسک (٪)", "chart-disk")}
+            ${chartPanel("network", "ترافیک شبکه (لحظه‌ای)", "chart-network")}
         </div>
         <div class="grid sm:grid-cols-2 gap-4 mb-4">
             <div class="glass-panel p-4">
@@ -414,27 +438,23 @@ function detailBodyTemplate() {
     `;
 }
 
-function buildLiveCharts() {
-    const ctxRes = document.getElementById("chart-resource");
-    resourceChart = new Chart(ctxRes, {
+function singleLineChart(canvasId, label, color, bg, yOpts) {
+    return new Chart(document.getElementById(canvasId), {
         type: "line",
-        data: {
-            labels: [],
-            datasets: [
-                { label: "CPU", data: [], borderColor: "#818cf8", backgroundColor: "rgba(129,140,248,0.15)", tension: 0.35, fill: true, pointRadius: 0 },
-                { label: "RAM", data: [], borderColor: "#34d399", backgroundColor: "rgba(52,211,153,0.1)", tension: 0.35, fill: true, pointRadius: 0 },
-                { label: "دیسک", data: [], borderColor: "#fbbf24", backgroundColor: "rgba(251,191,36,0.08)", tension: 0.35, fill: true, pointRadius: 0 },
-            ],
-        },
+        data: { labels: [], datasets: [{ label, data: [], borderColor: color, backgroundColor: bg, tension: 0.35, fill: true, pointRadius: 0 }] },
         options: {
             responsive: true, maintainAspectRatio: false, animation: false,
-            scales: { y: { min: 0, max: 100, grid: { color: "rgba(255,255,255,0.06)" } }, x: { grid: { display: false }, ticks: { maxTicksLimit: 6 } } },
-            plugins: { legend: { position: "bottom", labels: { boxWidth: 10, padding: 10 } } },
+            scales: { y: Object.assign({ grid: { color: "rgba(255,255,255,0.06)" } }, yOpts), x: { grid: { display: false }, ticks: { maxTicksLimit: 6 } } },
+            plugins: { legend: { display: false } },
         },
     });
+}
 
-    const ctxNet = document.getElementById("chart-network");
-    networkChart = new Chart(ctxNet, {
+function buildLiveCharts() {
+    charts.cpu = singleLineChart("chart-cpu", "CPU", "#818cf8", "rgba(129,140,248,0.15)", { min: 0, max: 100 });
+    charts.ram = singleLineChart("chart-ram", "RAM", "#34d399", "rgba(52,211,153,0.1)", { min: 0, max: 100 });
+    charts.disk = singleLineChart("chart-disk", "Disk", "#fbbf24", "rgba(251,191,36,0.08)", { min: 0, max: 100 });
+    charts.network = new Chart(document.getElementById("chart-network"), {
         type: "line",
         data: {
             labels: [],
@@ -449,6 +469,15 @@ function buildLiveCharts() {
             plugins: { legend: { position: "bottom", labels: { boxWidth: 10, padding: 10 } } },
         },
     });
+
+    document.querySelectorAll(".chart-toggle").forEach((btn) => {
+        btn.onclick = () => {
+            const key = btn.dataset.chart;
+            const box = document.getElementById(`box-${key}`);
+            const hidden = box.classList.toggle("hidden");
+            btn.textContent = hidden ? "🙈" : "👁️";
+        };
+    });
 }
 
 function pushPoint(chart, label, values) {
@@ -459,6 +488,20 @@ function pushPoint(chart, label, values) {
         chart.data.datasets.forEach((ds) => ds.data.shift());
     }
     chart.update("none");
+}
+
+function pushSingle(chart, label, value) {
+    pushPoint(chart, label, [value]);
+}
+
+function updateTrafficBanner(rx, tx, iface) {
+    const banner = el("traffic-total-banner");
+    if (rx == null || tx == null) {
+        banner.classList.add("hidden");
+        return;
+    }
+    banner.classList.remove("hidden");
+    banner.innerHTML = `📡 کل ترافیک مصرفی${iface ? ` (${escapeHtml(iface)})` : ""}: ⬆ ${fmtBytes(tx)} &nbsp; ⬇ ${fmtBytes(rx)}`;
 }
 
 function renderProcList(containerId, procs, valueKey) {
@@ -478,12 +521,17 @@ function renderProcList(containerId, procs, valueKey) {
 async function seedHistory(serverId) {
     try {
         const history = await api(`/api/servers/${serverId}/history?limit=${MAX_POINTS}`);
+        let lastTraffic = null;
         history.forEach((row) => {
             if (row.status !== "up") return;
             const label = new Date(row.timestamp * 1000).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-            pushPoint(resourceChart, label, [row.cpu_percent, row.ram_percent, row.disk_percent]);
-            pushPoint(networkChart, label, [row.net_recv_bps, row.net_sent_bps]);
+            pushSingle(charts.cpu, label, row.cpu_percent);
+            pushSingle(charts.ram, label, row.ram_percent);
+            pushSingle(charts.disk, label, row.disk_percent);
+            pushPoint(charts.network, label, [row.net_recv_bps, row.net_sent_bps]);
+            if (row.traffic_rx_bytes != null) lastTraffic = row;
         });
+        if (lastTraffic) updateTrafficBanner(lastTraffic.traffic_rx_bytes, lastTraffic.traffic_tx_bytes, lastTraffic.traffic_iface);
     } catch (e) { /* بی‌اهمیت — چارت خالی شروع می‌شود */ }
 }
 
@@ -492,8 +540,11 @@ async function liveTick(server) {
         const result = await api(`/api/servers/${server.id}/check`, { method: "POST" });
         const label = new Date(result.timestamp * 1000).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
         if (result.ok) {
-            pushPoint(resourceChart, label, [result.cpu_percent, result.ram_percent, result.disk_percent]);
-            pushPoint(networkChart, label, [result.net_recv_bps, result.net_sent_bps]);
+            pushSingle(charts.cpu, label, result.cpu_percent);
+            pushSingle(charts.ram, label, result.ram_percent);
+            pushSingle(charts.disk, label, result.disk_percent);
+            pushPoint(charts.network, label, [result.net_recv_bps, result.net_sent_bps]);
+            updateTrafficBanner(result.traffic_rx_bytes, result.traffic_tx_bytes, result.traffic_iface);
             const procs = result.raw?.processes;
             renderProcList("top-cpu-list", procs?.top_cpu, "cpu_percent");
             renderProcList("top-ram-list", procs?.top_ram, "ram_percent");
@@ -568,6 +619,83 @@ el("btn-scan-now").onclick = async () => {
     } finally {
         btn.disabled = false;
         btn.textContent = "⚡ اسکن فوری";
+    }
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  مودال تنظیمات — فاصله‌ی چک + پشتیبان‌گیری/بازیابی
+// ══════════════════════════════════════════════════════════════════
+
+const settingsOverlay = el("settings-overlay");
+
+function setStatusBox(elId, kind, text) {
+    const box = el(elId);
+    box.classList.remove("hidden");
+    const styles = {
+        info: "text-indigo-300", success: "text-emerald-400", error: "text-red-400",
+    };
+    box.className = "text-xs mt-2 " + styles[kind];
+    box.textContent = text;
+}
+
+el("btn-settings").onclick = async () => {
+    el("settings-interval-status").classList.add("hidden");
+    el("settings-restore-status").classList.add("hidden");
+    try {
+        const { minutes } = await api("/api/settings/interval");
+        el("s-interval").value = minutes;
+    } catch (e) { /* پیش‌فرض خالی می‌ماند */ }
+    settingsOverlay.classList.remove("hidden");
+};
+el("btn-settings-close").onclick = () => settingsOverlay.classList.add("hidden");
+
+el("btn-save-interval").onclick = async () => {
+    const minutes = parseInt(el("s-interval").value, 10);
+    if (!minutes || minutes < 1) {
+        setStatusBox("settings-interval-status", "error", "یک عدد معتبر (دقیقه) وارد کن.");
+        return;
+    }
+    try {
+        await api("/api/settings/interval", { method: "POST", body: JSON.stringify({ minutes }) });
+        setStatusBox("settings-interval-status", "success", `✅ فاصله‌ی چک روی ${minutes} دقیقه تنظیم شد.`);
+        await refreshInterval();
+    } catch (e) {
+        setStatusBox("settings-interval-status", "error", "خطا: " + e.message);
+    }
+};
+
+el("btn-backup-now").onclick = () => {
+    window.location.href = "/api/backup";
+};
+
+el("btn-restore-upload").onclick = async () => {
+    const fileInput = el("s-restore-file");
+    const file = fileInput.files[0];
+    if (!file) {
+        setStatusBox("settings-restore-status", "error", "اول یک فایل .db انتخاب کن.");
+        return;
+    }
+    if (!confirm("دیتابیس فعلی با این فایل جایگزین می‌شود. مطمئنی؟")) return;
+
+    const btn = el("btn-restore-upload");
+    btn.disabled = true;
+    btn.textContent = "⏳ در حال بازیابی...";
+    try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const resp = await fetch("/api/restore", { method: "POST", body: formData });
+        if (!resp.ok) {
+            const body = await resp.json().catch(() => ({}));
+            throw new Error(body.detail || `HTTP ${resp.status}`);
+        }
+        setStatusBox("settings-restore-status", "success", "✅ دیتابیس بازیابی شد.");
+        fileInput.value = "";
+        await refresh();
+    } catch (e) {
+        setStatusBox("settings-restore-status", "error", "خطا: " + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "♻️ بازیابی از فایل";
     }
 };
 

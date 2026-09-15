@@ -50,6 +50,7 @@
                 <button id="btn-scan-now" class="btn-glass text-sm">⚡ اسکن فوری</button>
                 <button id="btn-add-server" class="btn-glass text-sm">✎ افزودن دستی</button>
                 <button id="btn-deploy-server" class="btn-primary text-sm">🚀 استقرار خودکار (SSH)</button>
+                <button id="btn-settings" class="btn-glass text-sm">⚙️ تنظیمات</button>
             </div>
         </div>
     </header>
@@ -111,6 +112,39 @@
                     <button type="button" id="btn-deploy-cancel" class="btn-glass">انصراف</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- مودال تنظیمات -->
+    <div id="settings-overlay" class="modal-overlay hidden">
+        <div class="glass-panel modal-box">
+            <h2 class="text-lg font-bold mb-4">⚙️ تنظیمات</h2>
+
+            <div class="mb-5">
+                <div class="text-sm font-semibold mb-2">فاصله‌ی چک خودکار</div>
+                <div class="flex gap-2 items-end">
+                    <label class="field flex-1"><span>دقیقه</span><input id="s-interval" type="number" min="1"></label>
+                    <button id="btn-save-interval" class="btn-primary">ذخیره</button>
+                </div>
+                <div id="settings-interval-status" class="text-xs mt-2 hidden"></div>
+            </div>
+
+            <div class="border-t border-border pt-4">
+                <div class="text-sm font-semibold mb-2">پشتیبان‌گیری و بازیابی دیتابیس</div>
+                <div class="flex flex-wrap gap-2 mb-3">
+                    <button id="btn-backup-now" class="btn-glass text-sm">⬇️ دانلود بکاپ (.db)</button>
+                </div>
+                <label class="field">
+                    <span>بازیابی از فایل بکاپ (.db) — دیتابیس فعلی جایگزین می‌شود</span>
+                    <input id="s-restore-file" type="file" accept=".db">
+                </label>
+                <button id="btn-restore-upload" class="btn-danger text-sm mt-2">♻️ بازیابی از فایل</button>
+                <div id="settings-restore-status" class="text-xs mt-2 hidden"></div>
+            </div>
+
+            <div class="flex gap-2 justify-end pt-4">
+                <button type="button" id="btn-settings-close" class="btn-glass">بستن</button>
+            </div>
         </div>
     </div>
 

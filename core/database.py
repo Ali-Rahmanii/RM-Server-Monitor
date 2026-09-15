@@ -37,6 +37,13 @@ _SERVER_MIGRATION_COLUMNS = {
     "installed_via": "TEXT NOT NULL DEFAULT 'manual'",
 }
 
+_LOG_MIGRATION_COLUMNS = {
+    # کل ترافیک مصرفی (از vnstat روی ایجنت) — بایت خام، نه سرعت لحظه‌ای
+    "traffic_rx_bytes": "REAL",
+    "traffic_tx_bytes": "REAL",
+    "traffic_iface": "TEXT",
+}
+
 
 def init_db() -> None:
     with _connect() as conn:
@@ -77,6 +84,11 @@ def init_db() -> None:
                 raw_json TEXT
             )
         """)
+        for col, coltype in _LOG_MIGRATION_COLUMNS.items():
+            try:
+                conn.execute(f"ALTER TABLE logs ADD COLUMN {col} {coltype}")
+            except sqlite3.OperationalError:
+                pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
@@ -183,14 +195,18 @@ def insert_log(
     ram_percent: Optional[float] = None, disk_percent: Optional[float] = None,
     net_sent_bps: Optional[float] = None, net_recv_bps: Optional[float] = None,
     error: Optional[str] = None, raw_json: Optional[str] = None,
+    traffic_rx_bytes: Optional[float] = None, traffic_tx_bytes: Optional[float] = None,
+    traffic_iface: Optional[str] = None,
 ) -> None:
     with _connect() as conn:
         conn.execute(
             "INSERT INTO logs (server_id, timestamp, status, ping_ms, cpu_percent, "
-            "ram_percent, disk_percent, net_sent_bps, net_recv_bps, error, raw_json) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "ram_percent, disk_percent, net_sent_bps, net_recv_bps, error, raw_json, "
+            "traffic_rx_bytes, traffic_tx_bytes, traffic_iface) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (server_id, timestamp, status, ping_ms, cpu_percent, ram_percent,
-             disk_percent, net_sent_bps, net_recv_bps, error, raw_json),
+             disk_percent, net_sent_bps, net_recv_bps, error, raw_json,
+             traffic_rx_bytes, traffic_tx_bytes, traffic_iface),
         )
         # پاکسازی سبک: فقط N ردیف آخر هر سرور نگه داشته می‌شود تا
         # دیتابیس در اجرای طولانی‌مدت بی‌رویه بزرگ نشود.
@@ -208,6 +224,18 @@ def get_latest_log(server_id: int) -> Optional[sqlite3.Row]:
         return conn.execute(
             "SELECT * FROM logs WHERE server_id = ? ORDER BY timestamp DESC LIMIT 1",
             (server_id,),
+        ).fetchone()
+
+
+def get_avg_metrics(server_id: int, since_ts: float) -> Optional[sqlite3.Row]:
+    """میانگین CPU/RAM/دیسک یک سرور از since_ts تا الان (برای گزارش دوره‌ای)."""
+    with _connect() as conn:
+        return conn.execute(
+            "SELECT AVG(cpu_percent) AS avg_cpu, AVG(ram_percent) AS avg_ram, "
+            "AVG(disk_percent) AS avg_disk, COUNT(*) AS sample_count, "
+            "SUM(CASE WHEN status='down' THEN 1 ELSE 0 END) AS down_count "
+            "FROM logs WHERE server_id = ? AND timestamp >= ?",
+            (server_id, since_ts),
         ).fetchone()
 
 
@@ -238,3 +266,58 @@ def set_setting(key: str, value: str) -> None:
             (key, value),
         )
         conn.commit()
+
+
+# ══════════════════════════════════════════════════════════════════
+#  پشتیبان‌گیری / بازیابی — منطق مشترک بین وب و ربات تلگرام
+# ══════════════════════════════════════════════════════════════════
+
+def checkpoint_wal() -> None:
+    """
+    باید همیشه دقیقاً قبل از گرفتن بکاپ صدا زده شود. چون از WAL mode
+    استفاده می‌کنیم، تغییرات اخیر ممکن است هنوز فقط در فایل کنار‌دستی
+    monitorbot.db-wal باشند و فایل اصلی به‌تنهایی یک snapshot ناقص/خراب
+    باشد — این تابع WAL را کامل داخل فایل اصلی merge می‌کند تا کپی
+    خام فایل .db همیشه یک دیتابیس کامل و سالم باشد.
+    """
+    with _connect() as conn:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+
+def validate_backup_file(path) -> bool:
+    """چک می‌کند که فایل داده‌شده واقعاً یک دیتابیس معتبر Monitorbot است."""
+    import pathlib
+    path = pathlib.Path(path)
+    try:
+        with open(path, "rb") as f:
+            header = f.read(16)
+        if header[:16] != b"SQLite format 3\x00":
+            return False
+        conn = sqlite3.connect(str(path))
+        try:
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()}
+        finally:
+            conn.close()
+        return {"servers", "logs", "settings"}.issubset(tables)
+    except Exception:
+        return False
+
+
+def restore_from_backup(path) -> None:
+    """
+    فایل دیتابیس فعلی را با فایل داده‌شده جایگزین می‌کند (بعد از اینکه
+    caller با validate_backup_file اعتبارش را چک کرده). یک نسخه‌ی
+    ایمنی از دیتابیس قبلی نگه می‌دارد و مهاجرت ستون‌ها را روی فایل
+    جدید اجرا می‌کند.
+    """
+    import pathlib
+    import shutil
+    src = pathlib.Path(path)
+    dst = pathlib.Path(config.DB_PATH)
+    if dst.exists():
+        safety_copy = dst.with_name(f"{dst.stem}.before-restore.db")
+        shutil.copy2(dst, safety_copy)
+    shutil.move(str(src), str(dst))
+    init_db()

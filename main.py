@@ -76,6 +76,7 @@ async def main() -> None:
         await bot_app.initialize()
         await bot_app.start()
         await bot_app.updater.start_polling()
+        tasks.append(asyncio.create_task(scheduler.summary_loop()))
         logger.info("ربات تلگرام شروع به کار کرد.")
     else:
         logger.warning("ربات تلگرام غیرفعال است (TELEGRAM_BOT_TOKEN خالی است).")
@@ -92,6 +93,7 @@ async def main() -> None:
         pass
     finally:
         scheduler.stop_scheduler()
+        scheduler.stop_summary_loop()
         stop_event.set()
         if bot_app is not None:
             await bot_app.updater.stop()

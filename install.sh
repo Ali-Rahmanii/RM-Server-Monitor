@@ -98,6 +98,44 @@ ensure_python() {
     fi
 }
 
+# نصب و راه‌اندازی vnstat برای گرفتن کل ترافیک واقعی مصرفی (نه فقط
+# سرعت لحظه‌ای) — اختیاری: اگر نصب نشود، ایجنت بدون این بخش کار می‌کند.
+ensure_vnstat() {
+    if ! command -v vnstat >/dev/null 2>&1; then
+        log "نصب vnstat برای آمار کل ترافیک واقعی..."
+        if command -v apt-get >/dev/null 2>&1; then
+            apt-get update -qq && apt-get install -y -qq vnstat
+        elif command -v dnf >/dev/null 2>&1; then
+            dnf install -y -q vnstat
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y -q vnstat
+        else
+            warn "vnstat روی این توزیع خودکار نصب نمی‌شود — آمار کل ترافیک در دسترس نخواهد بود."
+            return
+        fi
+    fi
+
+    if ! command -v vnstat >/dev/null 2>&1; then
+        warn "نصب vnstat ناموفق بود — آمار کل ترافیک در دسترس نخواهد بود."
+        return
+    fi
+
+    local iface
+    iface="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="dev") print $(i+1)}' | head -n1)"
+    if [[ -z "${iface}" ]]; then
+        iface="$(ls /sys/class/net 2>/dev/null | grep -v '^lo$' | head -n1)"
+    fi
+    if [[ -n "${iface}" ]]; then
+        vnstat --add -i "${iface}" >/dev/null 2>&1 || true
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl enable --now vnstat >/dev/null 2>&1 || true
+        fi
+        log "vnstat روی رابط شبکه‌ی ${iface} فعال شد."
+    else
+        warn "رابط شبکه‌ی اصلی پیدا نشد — در صورت نیاز vnstat را دستی راه‌اندازی کن."
+    fi
+}
+
 write_agent_files() {
     mkdir -p "${INSTALL_DIR}"
     log "نوشتن فایل‌های ایجنت در ${INSTALL_DIR}..."
@@ -113,22 +151,27 @@ REQ_EOF
 """
 Monitorbot Agent — یک API سبک که روی هر سرور هدف اجرا می‌شود و
 وضعیت سخت‌افزار/شبکه/پردازش‌های آن سرور را برمی‌گرداند.
+
+اجرا روی هر سرور هدف:
+    pip install -r requirements.txt
+    python agent.py
+
+پیش از اجرا، AGENT_TOKEN را در agent/.env تنظیم کن — سیستم مرکزی
+باید دقیقاً همین توکن را به‌صورت Bearer برای دسترسی به /status بفرستد.
 """
 from __future__ import annotations
 
+import json
 import os
 import socket
+import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-if sys.platform == "win32":
-    for _stream in (sys.stdout, sys.stderr):
-        try:
-            _stream.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+# کنسول ویندوز معمولاً با codepage cp1252 اجرا می‌شود که نمی‌تواند
+# متن فارسی/ایموجی را چاپ کند — خروجی را صریحاً روی UTF-8 می‌گذاریم.
 
 import psutil
 from fastapi import FastAPI, Header, HTTPException
@@ -152,21 +195,34 @@ _boot_time = time.time()
 
 
 def _check_token(authorization: Optional[str]) -> None:
+    """
+    ⚠️ پیش‌فرض امن: اگر AGENT_TOKEN اصلاً تنظیم نشده باشد، ایجنت به‌جای
+    باز ماندن بدون احرازهویت، همه‌ی درخواست‌ها را رد می‌کند.
+    """
     if not AGENT_TOKEN:
         raise HTTPException(status_code=503, detail="AGENT_TOKEN روی این ایجنت تنظیم نشده است")
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Bearer token یافت نشد")
     provided = authorization[len("Bearer "):].strip()
+    # مقایسه‌ی زمان‌ثابت — جلوگیری از حمله‌ی timing روی توکن
     if not secrets.compare_digest(provided, AGENT_TOKEN):
         raise HTTPException(status_code=401, detail="توکن نامعتبر است")
 
 
 @app.get("/health")
 def health():
+    """بدون نیاز به توکن — فقط برای تشخیص بالا/پایین بودن خودِ ایجنت."""
     return {"status": "ok", "uptime_seconds": round(time.time() - _boot_time, 1)}
 
 
 def _collect_processes(limit: int) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    ⚠️ نکته‌ی مهم درباره‌ی دقت: psutil برای cpu_percent هر پروسه به دو
+    نمونه‌گیری با فاصله نیاز دارد — فراخوانی اول همیشه ۰ برمی‌گرداند.
+    اینجا اول یک نمونه‌ی «گرم‌کننده» می‌گیریم، کمی صبر می‌کنیم، و بعد
+    نمونه‌ی واقعی را می‌خوانیم — وگرنه لیست «پرمصرف‌ترین‌ها» همیشه خالی
+    یا نادرست می‌شد.
+    """
     snapshot = list(psutil.process_iter(["pid", "name", "username"]))
     for p in snapshot:
         try:
@@ -196,15 +252,51 @@ def _collect_processes(limit: int) -> Dict[str, List[Dict[str, Any]]]:
     return {"top_cpu": top_cpu, "top_ram": top_ram}
 
 
+def _get_vnstat_traffic() -> Optional[Dict[str, Any]]:
+    """
+    کل ترافیک واقعیِ مصرف‌شده (نه سرعت لحظه‌ای) از vnstat، اگر روی
+    سرور نصب باشد (با install.sh نصب می‌شود). خروجی JSON نسخه‌ی 1.x
+    vnstat بر حسب KiB است و نسخه‌ی 2.x بر حسب بایت خام — این تفاوت
+    اینجا نرمال‌سازی می‌شود. اگر vnstat نصب نباشد یا خروجی غیرمنتظره
+    بدهد، None برمی‌گردد (این ویژگی هیچ‌وقت نباید /status را خراب کند).
+    """
+    try:
+        result = subprocess.run(
+            ["vnstat", "--json"], capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        data = json.loads(result.stdout)
+        interfaces = data.get("interfaces") or []
+        if not interfaces:
+            return None
+        iface = interfaces[0]
+        total = (iface.get("traffic") or {}).get("total") or {}
+        rx, tx = total.get("rx"), total.get("tx")
+        if rx is None or tx is None:
+            return None
+        version = str(data.get("vnstatversion", "2"))
+        if version.startswith("1."):
+            rx, tx = rx * 1024, tx * 1024
+        return {
+            "iface": iface.get("name") or iface.get("id") or "?",
+            "rx_bytes": float(rx),
+            "tx_bytes": float(tx),
+        }
+    except Exception:
+        return None
+
+
 @app.get("/status")
 def status(authorization: Optional[str] = Header(default=None)):
     _check_token(authorization)
 
+    # CPU: یک نمونه‌ی کوتاه برای عدد لحظه‌ایِ معنادار (نه ۰ فوری)
     cpu_percent = psutil.cpu_percent(interval=0.3)
     cpu_per_core = psutil.cpu_percent(interval=None, percpu=True)
     load_avg = None
     try:
-        load_avg = list(os.getloadavg())
+        load_avg = list(os.getloadavg())  # فقط لینوکس/مک
     except (AttributeError, OSError):
         pass
 
@@ -226,10 +318,13 @@ def status(authorization: Optional[str] = Header(default=None)):
             "percent": usage.percent,
         })
 
+    # ⏱ پهنای باند لحظه‌ای: دو نمونه از شمارنده‌های تجمعی با فاصله‌ی
+    # کوتاه، تا نرخ واقعی بایت‌بر‌ثانیه به‌دست بیاید — نه فقط عدد کل
+    # از زمان بوت که برای مانیتورینگ لحظه‌ای بی‌فایده است.
     io1 = psutil.net_io_counters()
     time.sleep(0.5)
     io2 = psutil.net_io_counters()
-    sent_rate = max(0, io2.bytes_sent - io1.bytes_sent) * 2
+    sent_rate = max(0, io2.bytes_sent - io1.bytes_sent) * 2  # bytes/sec (نمونه ۰.۵ ثانیه‌ای)
     recv_rate = max(0, io2.bytes_recv - io1.bytes_recv) * 2
 
     disk_percent_max = max((d["percent"] for d in disks), default=0)
@@ -258,6 +353,7 @@ def status(authorization: Optional[str] = Header(default=None)):
             "recv_bytes_per_sec": round(recv_rate, 1),
         },
         "processes": _collect_processes(TOP_N),
+        "traffic_total": _get_vnstat_traffic(),
     })
 
 
@@ -265,10 +361,12 @@ if __name__ == "__main__":
     import uvicorn
 
     if not AGENT_TOKEN:
-        print("AGENT_TOKEN تنظیم نشده — /status هیچ درخواستی را قبول نمی‌کند.")
+        print("⚠️  AGENT_TOKEN تنظیم نشده — /status هیچ درخواستی را قبول نمی‌کند.")
+        print("    مقدارش را در agent/.env بگذار، مثلاً: AGENT_TOKEN=یک-رشته-تصادفی-طولانی")
 
-    print(f"Monitorbot Agent روی پورت {AGENT_PORT} اجرا می‌شود (میزبان: {socket.gethostname()})")
+    print(f"🚀 Monitorbot Agent روی پورت {AGENT_PORT} اجرا می‌شود (میزبان: {socket.gethostname()})")
     uvicorn.run(app, host="0.0.0.0", port=AGENT_PORT)
+
 AGENT_EOF
 }
 
@@ -373,6 +471,7 @@ do_install() {
     check_root
     check_port_free
     ensure_python
+    ensure_vnstat
     write_agent_files
     setup_venv_and_service "install"
 }
@@ -382,6 +481,7 @@ do_update() {
     log "شروع به‌روزرسانی ایجنت..."
     mkdir -p "${INSTALL_DIR}"
     ensure_python
+    ensure_vnstat
     write_agent_files
     setup_venv_and_service "update"
 }

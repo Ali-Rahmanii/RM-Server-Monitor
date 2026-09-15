@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# RM Server Monitor — نصب یک‌خطی.
+# RM Server Monitor — one-line installer.
 #
 #   bash <(curl -Ls https://raw.githubusercontent.com/Ali-Rahmanii/RM-Server-Monitor/main/setup.sh)
 #
-# این اسکریپت: مخزن را در یک مسیر ثابت کلون می‌کند (یا اگر از قبل
-# هست، به‌روزش می‌کند)، دستور سراسری «rmmonitor» را می‌سازد، و در
-# پایان خودش منوی تعاملی را باز می‌کند.
+# This script: clones the repo to a fixed location (or updates it if
+# already present), creates the global "rmmonitor" command, and
+# finally opens the interactive menu itself.
 #
 set -uo pipefail
 
@@ -16,22 +16,22 @@ BIN_LINK="/usr/local/bin/rmmonitor"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
 log()  { echo -e "${GREEN}[setup]${RESET} $*"; }
-warn() { echo -e "${YELLOW}[setup] هشدار:${RESET} $*"; }
-err()  { echo -e "${RED}[setup] خطا:${RESET} $*" >&2; }
+warn() { echo -e "${YELLOW}[setup] warning:${RESET} $*"; }
+err()  { echo -e "${RED}[setup] error:${RESET} $*" >&2; }
 die()  { err "$*"; exit 1; }
 
 if [[ "${EUID}" -ne 0 ]]; then
-    die "این اسکریپت باید با root/sudo اجرا شود. مثال:
+    die "This script must be run as root/sudo. Example:
   curl -Ls https://raw.githubusercontent.com/Ali-Rahmanii/RM-Server-Monitor/main/setup.sh | sudo bash"
 fi
 
 echo -e "${CYAN}${BOLD}"
-echo "  RM Server Monitor — نصب سریع"
+echo "  RM Server Monitor — Quick Setup"
 echo -e "${RESET}"
 
 # ── git ──
 if ! command -v git >/dev/null 2>&1; then
-    log "git پیدا نشد — در حال نصب..."
+    log "git not found — installing..."
     if command -v apt-get >/dev/null 2>&1; then
         apt-get update -qq && apt-get install -y -qq git
     elif command -v dnf >/dev/null 2>&1; then
@@ -39,38 +39,38 @@ if ! command -v git >/dev/null 2>&1; then
     elif command -v yum >/dev/null 2>&1; then
         yum install -y -q git
     else
-        die "git پیدا نشد و نصب خودکار روی این توزیع ممکن نیست. اول git را دستی نصب کن."
+        die "git not found and cannot be auto-installed on this distro. Install git manually first."
     fi
 fi
 
-# ── کلون یا به‌روزرسانی مخزن ──
+# ── clone or update the repo ──
 if [[ -d "${INSTALL_DIR}/.git" ]]; then
-    log "نصب قبلی در ${INSTALL_DIR} پیدا شد — به‌روزرسانی..."
-    git -C "${INSTALL_DIR}" pull --ff-only || warn "git pull ناموفق بود — با نسخه‌ی فعلی روی دیسک ادامه می‌دهیم."
+    log "Existing install found at ${INSTALL_DIR} — updating..."
+    git -C "${INSTALL_DIR}" pull --ff-only || warn "git pull failed — continuing with the current version on disk."
 elif [[ -e "${INSTALL_DIR}" ]]; then
-    die "مسیر ${INSTALL_DIR} از قبل وجود دارد ولی یک مخزن گیت نیست.
-حذفش کن یا با متغیر INSTALL_DIR=/مسیر/دیگر این اسکریپت را دوباره اجرا کن، مثلاً:
+    die "Path ${INSTALL_DIR} already exists but is not a git repo.
+Remove it, or re-run this script with a different path, e.g.:
   INSTALL_DIR=/opt/my-monitor bash <(curl -Ls .../setup.sh)"
 else
-    log "کلون کردن مخزن در ${INSTALL_DIR}..."
-    git clone --depth 1 "${REPO_URL}" "${INSTALL_DIR}" || die "کلون مخزن ناموفق بود — اتصال اینترنت یا آدرس مخزن را چک کن."
+    log "Cloning the repo into ${INSTALL_DIR}..."
+    git clone --depth 1 "${REPO_URL}" "${INSTALL_DIR}" || die "Repo clone failed — check your internet connection or the repo URL."
 fi
 
-# ── اجرایی‌کردن اسکریپت‌ها ──
+# ── make scripts executable ──
 chmod +x "${INSTALL_DIR}/rmserver.sh" 2>/dev/null || true
 chmod +x "${INSTALL_DIR}/install.sh" 2>/dev/null || true
 
-# ── دستور سراسری rmmonitor ──
-log "ساخت دستور سراسری «rmmonitor»..."
+# ── global "rmmonitor" command ──
+log "Creating the global \"rmmonitor\" command..."
 mkdir -p "$(dirname "${BIN_LINK}")"
 ln -sf "${INSTALL_DIR}/rmserver.sh" "${BIN_LINK}"
 
 if ! command -v rmmonitor >/dev/null 2>&1; then
-    warn "/usr/local/bin ظاهراً در PATH نیست — از این به بعد یا با مسیر کامل اجرا کن (${BIN_LINK}) یا /usr/local/bin را به PATH اضافه کن."
+    warn "/usr/local/bin doesn't seem to be in PATH — either run with the full path (${BIN_LINK}) or add /usr/local/bin to your PATH."
 fi
 
 echo ""
-log "نصب تمام شد! از این به بعد هرجا بودی کافیه بنویسی: ${BOLD}rmmonitor${RESET}"
+log "Setup complete! From now on, anywhere, just type: ${BOLD}rmmonitor${RESET}"
 echo ""
 sleep 1
 

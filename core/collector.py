@@ -85,6 +85,10 @@ async def collect_one(server_row) -> Dict[str, Any]:
         result["disk_percent"] = data.get("disk_percent_max")
         result["net_sent_bps"] = data.get("network", {}).get("sent_bytes_per_sec")
         result["net_recv_bps"] = data.get("network", {}).get("recv_bytes_per_sec")
+        traffic = data.get("traffic_total")
+        result["traffic_rx_bytes"] = traffic.get("rx_bytes") if traffic else None
+        result["traffic_tx_bytes"] = traffic.get("tx_bytes") if traffic else None
+        result["traffic_iface"] = traffic.get("iface") if traffic else None
         result["raw"] = data
         result["error"] = None
     else:

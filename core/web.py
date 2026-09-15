@@ -6,10 +6,13 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import tempfile
+import time
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -152,6 +155,8 @@ async def api_check_server(server_id: int, _=Depends(_check_auth)):
         ram_percent=result.get("ram_percent"), disk_percent=result.get("disk_percent"),
         net_sent_bps=result.get("net_sent_bps"), net_recv_bps=result.get("net_recv_bps"),
         error=result.get("error"),
+        traffic_rx_bytes=result.get("traffic_rx_bytes"), traffic_tx_bytes=result.get("traffic_tx_bytes"),
+        traffic_iface=result.get("traffic_iface"),
     )
     return result
 
@@ -275,3 +280,60 @@ async def api_update_agents(_=Depends(_check_auth)):
         "failed": failed,
         "skipped_no_ssh": skipped,
     }
+
+
+# ══════════════════════════════════════════════════════════════════
+#  تنظیمات گزارش دوره‌ای خلاصه (ربات تلگرام)
+# ══════════════════════════════════════════════════════════════════
+
+class SummarySettingsIn(BaseModel):
+    enabled: bool
+    interval_hours: float
+
+
+@app.get("/api/settings/summary")
+def api_get_summary_settings(_=Depends(_check_auth)):
+    return {
+        "enabled": scheduler.get_summary_enabled(),
+        "interval_hours": scheduler.get_summary_interval_hours(),
+    }
+
+
+@app.post("/api/settings/summary")
+def api_set_summary_settings(payload: SummarySettingsIn, _=Depends(_check_auth)):
+    scheduler.set_summary_enabled(payload.enabled)
+    hours = scheduler.set_summary_interval_hours(payload.interval_hours)
+    return {"enabled": payload.enabled, "interval_hours": hours}
+
+
+# ══════════════════════════════════════════════════════════════════
+#  پشتیبان‌گیری / بازیابی دیتابیس
+# ══════════════════════════════════════════════════════════════════
+
+@app.get("/api/backup")
+def api_backup(_=Depends(_check_auth)):
+    db_path = Path(config.DB_PATH)
+    if not db_path.exists():
+        raise HTTPException(status_code=404, detail="فایل دیتابیس پیدا نشد")
+    db.checkpoint_wal()  # وگرنه ممکن است فایل کپی‌شده ناقص/خراب باشد (WAL mode)
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    return FileResponse(
+        path=str(db_path),
+        filename=f"monitorbot-backup-{ts}.db",
+        media_type="application/octet-stream",
+    )
+
+
+@app.post("/api/restore")
+async def api_restore(file: UploadFile, _=Depends(_check_auth)):
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as tmp:
+        tmp_path = Path(tmp.name)
+        content = await file.read()
+        tmp.write(content)
+
+    if not db.validate_backup_file(tmp_path):
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="فایل آپلودشده یک دیتابیس معتبر Monitorbot نیست")
+
+    db.restore_from_backup(tmp_path)
+    return {"ok": True}

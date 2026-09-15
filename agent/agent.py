@@ -11,8 +11,10 @@ Monitorbot Agent — یک API سبک که روی هر سرور هدف اجرا �
 """
 from __future__ import annotations
 
+import json
 import os
 import socket
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -106,6 +108,41 @@ def _collect_processes(limit: int) -> Dict[str, List[Dict[str, Any]]]:
     return {"top_cpu": top_cpu, "top_ram": top_ram}
 
 
+def _get_vnstat_traffic() -> Optional[Dict[str, Any]]:
+    """
+    کل ترافیک واقعیِ مصرف‌شده (نه سرعت لحظه‌ای) از vnstat، اگر روی
+    سرور نصب باشد (با install.sh نصب می‌شود). خروجی JSON نسخه‌ی 1.x
+    vnstat بر حسب KiB است و نسخه‌ی 2.x بر حسب بایت خام — این تفاوت
+    اینجا نرمال‌سازی می‌شود. اگر vnstat نصب نباشد یا خروجی غیرمنتظره
+    بدهد، None برمی‌گردد (این ویژگی هیچ‌وقت نباید /status را خراب کند).
+    """
+    try:
+        result = subprocess.run(
+            ["vnstat", "--json"], capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        data = json.loads(result.stdout)
+        interfaces = data.get("interfaces") or []
+        if not interfaces:
+            return None
+        iface = interfaces[0]
+        total = (iface.get("traffic") or {}).get("total") or {}
+        rx, tx = total.get("rx"), total.get("tx")
+        if rx is None or tx is None:
+            return None
+        version = str(data.get("vnstatversion", "2"))
+        if version.startswith("1."):
+            rx, tx = rx * 1024, tx * 1024
+        return {
+            "iface": iface.get("name") or iface.get("id") or "?",
+            "rx_bytes": float(rx),
+            "tx_bytes": float(tx),
+        }
+    except Exception:
+        return None
+
+
 @app.get("/status")
 def status(authorization: Optional[str] = Header(default=None)):
     _check_token(authorization)
@@ -172,6 +209,7 @@ def status(authorization: Optional[str] = Header(default=None)):
             "recv_bytes_per_sec": round(recv_rate, 1),
         },
         "processes": _collect_processes(TOP_N),
+        "traffic_total": _get_vnstat_traffic(),
     })
 
 

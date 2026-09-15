@@ -31,13 +31,15 @@ RM Server Monitor is a two-part system for keeping an eye on a fleet of Linux se
 
 ### ✨ Features
 
-- **Live dashboard** — dark, glassmorphism UI (TailwindCSS) with real-time **Chart.js** gauges and time-series charts (CPU/RAM/Disk/Network), auto-refreshing every 2–3 seconds, no page reloads.
+- **Live dashboard** — dark, glassmorphism UI (TailwindCSS) with separately toggleable **Chart.js** charts per server (CPU, RAM, Disk, Network — hide/show each with the 👁️ button), auto-refreshing every 2–3 seconds, no page reloads.
 - **Top Consumers** — per-server live list of the heaviest CPU/RAM processes.
-- **Telegram bot** — `/servers`, `/status`, `/statusall`, `/top`, `/addserver`, `/delserver`, `/setinterval`, with automatic down/recovered/threshold alerts (sent only on state change, not spammed every cycle).
-- **SSH Auto-Deploy** — add a server by IP + SSH credentials from the dashboard; Core SSHes in, installs the agent, and registers it automatically. One click to remotely uninstall it too.
+- **Real total traffic** — the agent auto-installs and reads `vnstat`, so you see actual lifetime Rx/Tx bandwidth consumed, not just the live transfer rate — shown on cards, the detail view, and in bot reports.
+- **Telegram bot** — 100% English, entirely inline-keyboard driven (no text commands to memorize): browse servers, view live stats and top processes, add servers (manual or SSH auto-deploy), remote-uninstall, adjust settings, and back up/restore the database — all with buttons. Automatic down/recovered/threshold alerts (sent only on state change) plus optional periodic summary reports (average CPU/RAM over a configurable period).
+- **SSH Auto-Deploy** — add a server by IP + SSH credentials from the dashboard or the bot; Core SSHes in, installs the agent, and registers it automatically. One click to remotely uninstall it too.
+- **Adjustable check interval & DB backup/restore** — change the global scan interval from the dashboard's Settings panel, and download/upload the SQLite database as a backup, right from the browser (or the bot).
 - **One-line install** — `bash <(curl -Ls .../setup.sh)` clones the repo, sets up a global `rmmonitor` command, and drops you straight into the menu.
-- **`install.sh`** — a self-contained installer/uninstaller/updater for the agent, with a `systemd` service (`monitorbot-agent`), safe port-in-use pre-check, and idempotent updates that preserve the existing token.
-- **`rmserver.sh`** — an interactive, colored CLI menu to install Core as a `systemd` service, manage it, pull updates (and cascade the update to every SSH-deployed agent), or cleanly uninstall.
+- **`install.sh`** — a self-contained installer/uninstaller/updater for the agent (plus `vnstat` setup), with a `systemd` service (`monitorbot-agent`), safe port-in-use pre-check, and idempotent updates that preserve the existing token.
+- **`rmserver.sh`** — an interactive, colored CLI menu (GTA Sunset theme 🌅) to install Core as a `systemd` service, manage it, edit `.env`, pull updates (cascading to every SSH-deployed agent), back up/restore the database, or cleanly uninstall.
 - **Systemd support** end-to-end — both Agent and Core can run as always-on, auto-restarting services.
 
 ### 🚀 Quick Start
@@ -84,7 +86,11 @@ Log in with the `WEB_USERNAME` / `WEB_PASSWORD` from your `.env` (HTTP Basic Aut
 
 ### 🤖 Telegram Bot
 
-Set `TELEGRAM_BOT_TOKEN` (from [@BotFather](https://t.me/BotFather)) and `TELEGRAM_ADMIN_IDS` (your numeric Telegram user ID) in `.env`, then restart Core (`rmserver.sh` → option 2 → Restart). See [monitorbot/README.md](README.md) commands table below.
+Set `TELEGRAM_BOT_TOKEN` (from [@BotFather](https://t.me/BotFather)) and `TELEGRAM_ADMIN_IDS` (your numeric Telegram user ID) in `.env`, then restart Core (`rmserver.sh` → option 2 → Restart). Send `/start` — everything from there is inline buttons (glass keyboard), no commands to remember:
+
+- 📋 **Servers** — live status, refresh, top processes, add a server (manual token or SSH auto-deploy), delete from DB, or remote-uninstall via SSH.
+- ⚙️ **Settings** — change the check interval, and turn on periodic summary reports (average CPU/RAM per server over a period you choose — e.g. every 12h).
+- 💾 **Backup & Restore** — tap to receive `monitorbot.db` as a document, or reply with a `.db` file to restore it.
 
 ### 🔄 Updating
 
@@ -130,13 +136,15 @@ RM Server Monitor یک سیستم مانیتورینگ دو بخشی برای م
 
 ### ✨ امکانات
 
-- **داشبورد زنده** — رابط تاریک و شیشه‌ای با TailwindCSS، گیج‌ها و نمودارهای زمانی زنده با **Chart.js** برای CPU/RAM/دیسک/شبکه، به‌روزرسانی خودکار هر ۲ تا ۳ ثانیه بدون رفرش صفحه.
+- **داشبورد زنده** — رابط تاریک و شیشه‌ای با TailwindCSS، چهار چارت جدا و قابل‌مخفی‌کردن (با دکمه‌ی 👁️) برای هر سرور با **Chart.js**: CPU، RAM، دیسک، شبکه — به‌روزرسانی خودکار هر ۲ تا ۳ ثانیه بدون رفرش صفحه.
 - **پرمصرف‌ترین‌ها** — لیست زنده‌ی پردازش‌های پرمصرف CPU/RAM هر سرور.
-- **ربات تلگرام** — دستورات `/servers`، `/status`، `/statusall`، `/top`، `/addserver`، `/delserver`، `/setinterval` با هشدار خودکار قطعی/بازگشت/عبور از آستانه (فقط روی تغییر وضعیت، بدون اسپم).
-- **استقرار خودکار SSH** — افزودن سرور فقط با آی‌پی و اطلاعات SSH از داخل داشبورد؛ سیستم مرکزی خودش وصل می‌شود، ایجنت را نصب و ثبت می‌کند. حذف از راه دور هم با یک کلیک.
+- **ترافیک کل واقعی** — ایجنت خودش `vnstat` را نصب و می‌خواند، پس کل ترافیک واقعی مصرف‌شده (نه فقط سرعت لحظه‌ای) روی کارت‌ها، جزئیات سرور و گزارش‌های ربات نشان داده می‌شود.
+- **ربات تلگرام** — کاملاً انگلیسی و فقط با دکمه‌های شیشه‌ای (Inline Keyboard) کار می‌کند، بدون نیاز به حفظ دستور: مرور سرورها، وضعیت و پردازش‌های زنده، افزودن سرور (دستی یا SSH خودکار)، حذف از راه دور، تنظیمات، و بکاپ/بازیابی دیتابیس. هشدار خودکار قطعی/بازگشت/عبور از آستانه (فقط روی تغییر وضعیت) به‌علاوه‌ی گزارش دوره‌ای اختیاری (میانگین CPU/RAM در بازه‌ی دلخواه).
+- **استقرار خودکار SSH** — افزودن سرور فقط با آی‌پی و اطلاعات SSH از داخل داشبورد یا ربات؛ سیستم مرکزی خودش وصل می‌شود، ایجنت را نصب و ثبت می‌کند. حذف از راه دور هم با یک کلیک.
+- **فاصله‌ی چک قابل‌تنظیم + بکاپ/بازیابی دیتابیس** — از پنل تنظیمات داشبورد فاصله‌ی چک را عوض کن، و دیتابیس SQLite را مستقیم از مرورگر (یا ربات) دانلود/آپلود کن.
 - **نصب یک‌خطی** — با `bash <(curl -Ls .../setup.sh)` مخزن کلون می‌شود، دستور سراسری `rmmonitor` ساخته می‌شود، و مستقیم وارد منو می‌شوی.
-- **`install.sh`** — نصب/حذف/به‌روزرسانی خودکفای ایجنت، با سرویس systemd (`monitorbot-agent`)، بررسی امن اشغال‌نبودن پورت، و به‌روزرسانی idempotent که توکن موجود را حفظ می‌کند.
-- **`rmserver.sh`** — منوی رنگی و تعاملی برای نصب Core به‌عنوان سرویس systemd، مدیریت آن، دریافت آپدیت (و انتقال آپدیت به همه‌ی ایجنت‌های نصب‌شده با SSH)، یا حذف تمیز.
+- **`install.sh`** — نصب/حذف/به‌روزرسانی خودکفای ایجنت (به‌همراه راه‌اندازی `vnstat`)، با سرویس systemd (`monitorbot-agent`)، بررسی امن اشغال‌نبودن پورت، و به‌روزرسانی idempotent که توکن موجود را حفظ می‌کند.
+- **`rmserver.sh`** — منوی رنگی و تعاملی (تم غروب لس‌آنجلس 🌅) برای نصب Core به‌عنوان سرویس systemd، مدیریت آن، ویرایش `.env`، دریافت آپدیت (و انتقال آپدیت به همه‌ی ایجنت‌های نصب‌شده با SSH)، بکاپ/بازیابی دیتابیس، یا حذف تمیز.
 - **پشتیبانی کامل از systemd** — هم Agent و هم Core می‌توانند به‌صورت سرویس همیشه-روشن با auto-restart اجرا شوند.
 
 ### 🚀 شروع سریع
@@ -183,7 +191,11 @@ http://<آی‌پی-سرور>:8000
 
 ### 🤖 ربات تلگرام
 
-`TELEGRAM_BOT_TOKEN` (از [@BotFather](https://t.me/BotFather)) و `TELEGRAM_ADMIN_IDS` (آی‌دی عددی تلگرام خودت) را در `.env` تنظیم کن، بعد Core را ری‌استارت کن (`rmserver.sh` ← گزینه ۲ ← Restart).
+`TELEGRAM_BOT_TOKEN` (از [@BotFather](https://t.me/BotFather)) و `TELEGRAM_ADMIN_IDS` (آی‌دی عددی تلگرام خودت) را در `.env` تنظیم کن، بعد Core را ری‌استارت کن (`rmserver.sh` ← گزینه ۲ ← Restart). با `/start` شروع کن — از آنجا همه‌چیز با دکمه است، دستوری برای حفظ‌کردن نیست:
+
+- 📋 **Servers** — وضعیت زنده، رفرش، پردازش‌های پرمصرف، افزودن سرور (توکن دستی یا استقرار خودکار SSH)، حذف از دیتابیس، یا حذف از راه دور با SSH.
+- ⚙️ **Settings** — تغییر فاصله‌ی چک، و فعال‌کردن گزارش دوره‌ای (میانگین CPU/RAM هر سرور در بازه‌ی دلخواه — مثلاً هر ۱۲ ساعت).
+- 💾 **Backup & Restore** — با یک دکمه فایل `monitorbot.db` را دریافت کن، یا با ارسال یک فایل `.db` آن را بازیابی کن.
 
 ### 🔄 به‌روزرسانی
 

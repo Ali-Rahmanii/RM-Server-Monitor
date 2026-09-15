@@ -122,7 +122,14 @@ html { scroll-behavior: smooth; }
     font-size: 13px; font-weight: 700;
 }
 
-.chart-box { position: relative; height: 160px; }
+.chart-box { position: relative; height: 160px; transition: opacity .15s; }
+.chart-box.hidden { display: none; }
+
+.chart-toggle {
+    background: transparent; border: none; cursor: pointer; opacity: .7;
+    line-height: 1; padding: 2px 4px; border-radius: 6px;
+}
+.chart-toggle:hover { opacity: 1; background: rgba(255,255,255,0.06); }
 
 .proc-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; border-radius: 8px; font-size: 12px; }
 .proc-row:nth-child(odd) { background: rgba(255,255,255,0.03); }

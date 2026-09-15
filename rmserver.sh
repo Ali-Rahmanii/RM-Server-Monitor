@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 #
-# RM Server Monitor — اسکریپت اصلی مدیریت سیستم مرکزی (Core).
-# اجرا: bash rmserver.sh   (برای گزینه‌های نصب/سرویس/حذف با sudo اجرا کن)
-# یا از هرجایی با دستور سراسری: rmmonitor  (سیم‌لینکی که setup.sh می‌سازد)
+# RM Server Monitor — main Core management script.
+# Run: bash rmserver.sh   (use sudo for install/service/uninstall options)
+# Or from anywhere via the global command: rmmonitor  (symlink created by setup.sh)
 #
 set -uo pipefail
 
 VERSION="v1.0.0"
 
-# این اسکریپت معمولاً از راه یک symlink در /usr/local/bin/rmmonitor صدا
-# زده می‌شود — $BASH_SOURCE در آن حالت به مسیر symlink اشاره می‌کند نه
-# مسیر واقعی فایل، پس صریحاً symlink را دنبال می‌کنیم تا SCRIPT_DIR
-# همیشه به /opt/RM-Server-Monitor (یا هرجا واقعاً کلون شده) برسد.
+# This script is usually invoked through a symlink at
+# /usr/local/bin/rmmonitor — $BASH_SOURCE then points at the symlink,
+# not the real file, so we explicitly resolve it to make sure
+# SCRIPT_DIR always lands on the real install directory
+# (e.g. /opt/RM-Server-Monitor), no matter how it was launched.
 _resolve_script_dir() {
     local src="${BASH_SOURCE[0]}"
     while [[ -h "${src}" ]]; do
@@ -27,25 +28,34 @@ CORE_SERVICE_NAME="monitorbot-core"
 CORE_SERVICE_FILE="/etc/systemd/system/${CORE_SERVICE_NAME}.service"
 VENV_DIR="${SCRIPT_DIR}/.venv"
 ENV_FILE="${SCRIPT_DIR}/.env"
+DB_FILE="${SCRIPT_DIR}/monitorbot.db"
+BACKUP_DIR="${SCRIPT_DIR}/backups"
 
 # ══════════════════════════════════════════════════════════════════
-#  رنگ‌ها
+#  GTA Sunset / Vice City color palette (256-color ANSI)
 # ══════════════════════════════════════════════════════════════════
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'
-CYAN='\033[0;36m'; MAGENTA='\033[0;35m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
+C_PURPLE='\033[38;5;93m'
+C_VIOLET='\033[38;5;129m'
+C_MAGENTA='\033[38;5;165m'
+C_PINK='\033[38;5;201m'
+C_HOTPINK='\033[38;5;213m'
+C_ORANGE='\033[38;5;208m'
+C_AMBER='\033[38;5;214m'
+C_YELLOW='\033[38;5;220m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; DIM='\033[2m'; BOLD='\033[1m'; RESET='\033[0m'
 
 log()  { echo -e "${GREEN}[rmserver]${RESET} $*"; }
-warn() { echo -e "${YELLOW}[rmserver] هشدار:${RESET} $*"; }
-err()  { echo -e "${RED}[rmserver] خطا:${RESET} $*" >&2; }
+warn() { echo -e "${C_YELLOW}[rmserver] warning:${RESET} $*"; }
+err()  { echo -e "${RED}[rmserver] error:${RESET} $*" >&2; }
 die()  { err "$*"; exit 1; }
 
 check_root() {
     if [[ "${EUID}" -ne 0 ]]; then
-        die "این عملیات نیاز به دسترسی root دارد. دوباره با sudo اجرا کن: sudo bash rmserver.sh"
+        die "This action needs root. Re-run with sudo: sudo bash rmserver.sh"
     fi
 }
 
-pause() { echo ""; read -rp "برای ادامه Enter بزن..." _; }
+pause() { echo ""; read -rp "Press Enter to continue..." _; }
 
 load_env_var() {
     local key="$1" file="$2" default="${3:-}"
@@ -55,45 +65,45 @@ load_env_var() {
 }
 
 # ══════════════════════════════════════════════════════════════════
-#  هدر / بنر
+#  banner
 # ══════════════════════════════════════════════════════════════════
 print_banner() {
     clear
-    echo -e "${CYAN}${BOLD}"
-    cat <<'BANNER'
- ██████╗ ███╗   ███╗
- ██╔══██╗████╗ ████║
- ██████╔╝██╔████╔██║
- ██╔══██╗██║╚██╔╝██║
- ██║  ██║██║ ╚═╝ ██║
- ╚═╝  ╚═╝╚═╝     ╚═╝
-BANNER
-    echo -e "${RESET}${MAGENTA}${BOLD}     S E R V E R   M O N I T O R${RESET}"
+    echo -e "${C_PURPLE}${BOLD} ██████╗ ███╗   ███╗${RESET}"
+    echo -e "${C_VIOLET}${BOLD} ██╔══██╗████╗ ████║${RESET}"
+    echo -e "${C_MAGENTA}${BOLD} ██████╔╝██╔████╔██║${RESET}"
+    echo -e "${C_PINK}${BOLD} ██╔══██╗██║╚██╔╝██║${RESET}"
+    echo -e "${C_ORANGE}${BOLD} ██║  ██║██║ ╚═╝ ██║${RESET}"
+    echo -e "${C_YELLOW}${BOLD} ╚═╝  ╚═╝╚═╝     ╚═╝${RESET}"
+    echo -e "${C_HOTPINK}${BOLD}     S E R V E R   M O N I T O R${RESET}"
     echo -e "${DIM}     ─────────────────────────────────────${RESET}"
-    echo -e "${BOLD}     Developer:${RESET} ${CYAN}Ali Rahmani${RESET}"
-    echo -e "${BOLD}     Telegram :${RESET} ${CYAN}@a_alirahmani${RESET}"
-    echo -e "${BOLD}     GitHub   :${RESET} ${CYAN}https://github.com/Ali-Rahmanii/RM-Server-Monitor${RESET}"
+    echo -e "${BOLD}     Developer:${RESET} ${C_AMBER}Ali Rahmani${RESET}"
+    echo -e "${BOLD}     Telegram :${RESET} ${C_AMBER}@a_alirahmani${RESET}"
+    echo -e "${BOLD}     GitHub   :${RESET} ${C_AMBER}https://github.com/Ali-Rahmanii/RM-Server-Monitor${RESET}"
     echo -e "${DIM}     ─────────────────────────────────────${RESET}"
-    echo -e "     ${YELLOW}Version ${VERSION}${RESET}   ${DIM}·${RESET}   هر جا بودی، این منو را با تایپ ${BOLD}rmmonitor${RESET} باز کن"
+    echo -e "     ${C_YELLOW}Version ${VERSION}${RESET}   ${DIM}·${RESET}   run ${BOLD}rmmonitor${RESET} anytime, from anywhere"
     echo ""
 }
 
 print_menu() {
-    echo -e "${BOLD}منوی اصلی:${RESET}"
-    echo -e "  ${GREEN}1)${RESET} نصب سیستم مرکزی (Core) — venv + پکیج‌ها + systemd service"
-    echo -e "  ${GREEN}2)${RESET} شروع/توقف/ری‌استارت سرویس Core"
-    echo -e "  ${GREEN}3)${RESET} به‌روزرسانی سیستم (git pull + پکیج‌ها + ری‌استارت + به‌روزرسانی همه‌ی ایجنت‌ها)"
-    echo -e "  ${GREEN}4)${RESET} حذف کامل (سرویس Core + دیتابیس)"
-    echo -e "  ${RED}0)${RESET} خروج"
+    echo -e "${BOLD}Main Menu:${RESET}"
+    echo -e "  ${C_PINK}1)${RESET} Install Core System — venv + packages + systemd service"
+    echo -e "  ${C_PINK}2)${RESET} Start / Stop / Restart Core Service"
+    echo -e "  ${C_PINK}3)${RESET} Update System (git pull + packages + restart + update all agents)"
+    echo -e "  ${C_PINK}4)${RESET} Edit .env Configuration"
+    echo -e "  ${C_PINK}5)${RESET} Backup Database"
+    echo -e "  ${C_PINK}6)${RESET} Restore Database"
+    echo -e "  ${C_PINK}7)${RESET} Uninstall (remove Core service + database)"
+    echo -e "  ${RED}0)${RESET} Exit"
     echo ""
 }
 
 # ══════════════════════════════════════════════════════════════════
-#  ابزارهای مشترک
+#  shared helpers
 # ══════════════════════════════════════════════════════════════════
 ensure_python() {
     if ! command -v python3 >/dev/null 2>&1; then
-        log "python3 پیدا نشد — تلاش برای نصب خودکار..."
+        log "python3 not found — attempting automatic install..."
         if command -v apt-get >/dev/null 2>&1; then
             apt-get update -qq && apt-get install -y -qq python3 python3-venv python3-pip
         elif command -v dnf >/dev/null 2>&1; then
@@ -101,12 +111,12 @@ ensure_python() {
         elif command -v yum >/dev/null 2>&1; then
             yum install -y -q python3 python3-pip
         else
-            die "python3 پیدا نشد و نصب خودکار روی این توزیع ممکن نیست."
+            die "python3 not found and cannot be auto-installed on this distro."
         fi
     fi
     if ! python3 -m venv --help >/dev/null 2>&1; then
         if command -v apt-get >/dev/null 2>&1; then
-            log "نصب python3-venv..."
+            log "Installing python3-venv..."
             apt-get update -qq && apt-get install -y -qq python3-venv
         fi
     fi
@@ -117,30 +127,30 @@ service_exists() {
 }
 
 # ══════════════════════════════════════════════════════════════════
-#  1) نصب سیستم مرکزی
+#  1) Install Core System
 # ══════════════════════════════════════════════════════════════════
 install_core() {
     check_root
     ensure_python
 
     if [[ ! -x "${VENV_DIR}/bin/pip" ]]; then
-        log "ساخت virtualenv در ${VENV_DIR}..."
+        log "Creating virtualenv at ${VENV_DIR}..."
         python3 -m venv "${VENV_DIR}"
     fi
     if [[ ! -x "${VENV_DIR}/bin/pip" ]]; then
-        die "ساخت virtualenv ناموفق بود. آیا python3-venv نصب است؟"
+        die "Failed to create the virtualenv. Is python3-venv installed?"
     fi
 
-    log "نصب پکیج‌های پایتون..."
+    log "Installing Python packages..."
     "${VENV_DIR}/bin/pip" install --upgrade pip -q
     "${VENV_DIR}/bin/pip" install -r "${SCRIPT_DIR}/requirements.txt" -q
 
     if [[ ! -f "${ENV_FILE}" ]]; then
         if [[ -f "${SCRIPT_DIR}/.env.example" ]]; then
             cp "${SCRIPT_DIR}/.env.example" "${ENV_FILE}"
-            warn "فایل .env از روی نمونه ساخته شد. حتماً WEB_PASSWORD و TELEGRAM_BOT_TOKEN را در ${ENV_FILE} ویرایش کن."
+            warn ".env was created from the example file. Edit it (menu option 4) — at minimum set WEB_PASSWORD, and TELEGRAM_BOT_TOKEN/TELEGRAM_ADMIN_IDS if you want the bot active."
         else
-            die "نه .env و نه .env.example پیدا شد — یکی را دستی بساز."
+            die "Neither .env nor .env.example was found — create one manually."
         fi
     fi
 
@@ -148,7 +158,7 @@ install_core() {
     web_port="$(load_env_var WEB_PORT "${ENV_FILE}" 8000)"
 
     if command -v systemctl >/dev/null 2>&1; then
-        log "ساخت systemd service..."
+        log "Creating systemd service..."
         cat > "${CORE_SERVICE_FILE}" <<SERVICE_EOF
 [Unit]
 Description=Monitorbot Core (dashboard + scheduler + telegram bot)
@@ -170,72 +180,72 @@ SERVICE_EOF
         systemctl enable --now "${CORE_SERVICE_NAME}"
         sleep 2
         if systemctl is-active --quiet "${CORE_SERVICE_NAME}"; then
-            log "سرویس ${CORE_SERVICE_NAME} فعال است."
+            log "Service ${CORE_SERVICE_NAME} is active."
         else
-            err "سرویس بالا نیامد. لاگ: journalctl -u ${CORE_SERVICE_NAME} -n 50"
+            err "Service failed to start. Logs: journalctl -u ${CORE_SERVICE_NAME} -n 50"
         fi
     else
-        warn "systemctl پیدا نشد — سیستم را دستی با «${VENV_DIR}/bin/python main.py» اجرا کن."
+        warn "systemctl not found — run the system manually with: ${VENV_DIR}/bin/python main.py"
     fi
 
     echo ""
-    log "نصب کامل شد. داشبورد: http://<IP-سرور>:${web_port}"
+    log "Install complete. Dashboard: http://<server-ip>:${web_port}"
 }
 
 # ══════════════════════════════════════════════════════════════════
-#  2) مدیریت سرویس Core
+#  2) Manage Core service
 # ══════════════════════════════════════════════════════════════════
 manage_service() {
     if ! command -v systemctl >/dev/null 2>&1; then
-        err "systemctl روی این سیستم موجود نیست."
+        err "systemctl is not available on this system."
         pause; return
     fi
     if ! service_exists; then
-        err "سرویس ${CORE_SERVICE_NAME} هنوز نصب نشده — اول گزینه‌ی 1 را اجرا کن."
+        err "Service ${CORE_SERVICE_NAME} isn't installed yet — run option 1 first."
         pause; return
     fi
 
-    echo -e "${BOLD}مدیریت سرویس Core:${RESET}"
+    echo -e "${BOLD}Manage Core Service:${RESET}"
     echo "  1) Start"
     echo "  2) Stop"
     echo "  3) Restart"
     echo "  4) Status"
-    echo "  0) بازگشت"
+    echo "  0) Back"
     read -rp "> " sub
     case "${sub}" in
-        1) check_root; systemctl start "${CORE_SERVICE_NAME}" && log "شروع شد." ;;
-        2) check_root; systemctl stop "${CORE_SERVICE_NAME}" && log "متوقف شد." ;;
-        3) check_root; systemctl restart "${CORE_SERVICE_NAME}" && log "ری‌استارت شد." ;;
+        1) check_root; systemctl start "${CORE_SERVICE_NAME}" && log "Started." ;;
+        2) check_root; systemctl stop "${CORE_SERVICE_NAME}" && log "Stopped." ;;
+        3) check_root; systemctl restart "${CORE_SERVICE_NAME}" && log "Restarted." ;;
         4) systemctl status "${CORE_SERVICE_NAME}" --no-pager || true ;;
         0) return ;;
-        *) err "گزینه نامعتبر." ;;
+        *) err "Invalid option." ;;
     esac
     pause
 }
 
 # ══════════════════════════════════════════════════════════════════
-#  3) به‌روزرسانی کامل سیستم
+#  3) Full system update
 # ══════════════════════════════════════════════════════════════════
 update_system() {
-    log "شروع به‌روزرسانی..."
+    log "Starting update..."
 
     if [[ -d "${SCRIPT_DIR}/.git" ]]; then
-        log "دریافت آخرین نسخه از گیت..."
-        (cd "${SCRIPT_DIR}" && git pull) || warn "git pull ناموفق بود — با نسخه‌ی فعلی ادامه می‌دهیم."
+        log "Pulling the latest version from git..."
+        (cd "${SCRIPT_DIR}" && git pull) || warn "git pull failed — continuing with the current version on disk."
     else
-        warn "این پوشه یک git repo نیست — از git pull صرف‌نظر شد."
+        warn "This folder isn't a git repo — skipping git pull."
     fi
 
     if [[ -x "${VENV_DIR}/bin/pip" ]]; then
-        log "به‌روزرسانی پکیج‌های پایتون..."
+        log "Updating Python packages..."
         "${VENV_DIR}/bin/pip" install --upgrade -r "${SCRIPT_DIR}/requirements.txt" -q
     else
-        warn "virtualenv پیدا نشد — اول گزینه‌ی 1 (نصب) را اجرا کن."
+        warn "virtualenv not found — run option 1 (Install) first."
     fi
 
     if command -v systemctl >/dev/null 2>&1 && service_exists; then
         check_root
-        log "ری‌استارت سرویس Core..."
+        log "Restarting Core service..."
         systemctl restart "${CORE_SERVICE_NAME}"
         sleep 2
     fi
@@ -246,33 +256,146 @@ update_system() {
         web_user="$(load_env_var WEB_USERNAME "${ENV_FILE}" admin)"
         web_pass="$(load_env_var WEB_PASSWORD "${ENV_FILE}" changeme)"
 
-        log "درخواست به‌روزرسانی همه‌ی ایجنت‌های ثبت‌شده (از راه SSH) از طریق API..."
+        log "Requesting a remote update of every SSH-deployed agent via the API..."
         local response
         response="$(curl -s -u "${web_user}:${web_pass}" -X POST "http://127.0.0.1:${web_port}/api/update-agents" 2>/dev/null)"
         if [[ -z "${response}" ]]; then
-            warn "پاسخی از API دریافت نشد — آیا سرویس Core بالاست؟"
+            warn "No response from the API — is the Core service running?"
         elif command -v python3 >/dev/null 2>&1; then
             echo "${response}" | python3 -m json.tool 2>/dev/null || echo "${response}"
         else
             echo "${response}"
         fi
     else
-        warn "فایل .env پیدا نشد — به‌روزرسانی ایجنت‌ها رد شد."
+        warn ".env not found — skipped updating agents."
     fi
 
     echo ""
-    log "به‌روزرسانی تمام شد."
+    log "Update finished."
 }
 
 # ══════════════════════════════════════════════════════════════════
-#  4) حذف کامل
+#  4) Edit .env
+# ══════════════════════════════════════════════════════════════════
+edit_env() {
+    if [[ ! -f "${ENV_FILE}" ]]; then
+        if [[ -f "${SCRIPT_DIR}/.env.example" ]]; then
+            cp "${SCRIPT_DIR}/.env.example" "${ENV_FILE}"
+            log ".env didn't exist — created from .env.example."
+        else
+            err ".env and .env.example are both missing — nothing to edit."
+            pause; return
+        fi
+    fi
+
+    local editor="${EDITOR:-nano}"
+    if ! command -v "${editor}" >/dev/null 2>&1; then
+        if command -v nano >/dev/null 2>&1; then editor="nano"
+        elif command -v vim >/dev/null 2>&1; then editor="vim"
+        elif command -v vi >/dev/null 2>&1; then editor="vi"
+        else
+            err "No text editor found (nano/vim/vi). Install one first, e.g.: apt-get install -y nano"
+            pause; return
+        fi
+    fi
+
+    "${editor}" "${ENV_FILE}"
+    log ".env saved. Restart the Core service for changes to take effect (menu option 2)."
+}
+
+# ══════════════════════════════════════════════════════════════════
+#  5) Backup database
+# ══════════════════════════════════════════════════════════════════
+backup_database() {
+    if [[ ! -f "${DB_FILE}" ]]; then
+        err "Database file not found at ${DB_FILE}."
+        pause; return
+    fi
+    mkdir -p "${BACKUP_DIR}"
+
+    # If the WAL file exists and we have the sqlite3 CLI, checkpoint it
+    # into the main file first — otherwise a raw copy of the .db file
+    # while Core is running can be an incomplete/corrupt snapshot.
+    if [[ -f "${DB_FILE}-wal" ]] && command -v sqlite3 >/dev/null 2>&1; then
+        sqlite3 "${DB_FILE}" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
+    elif [[ -f "${DB_FILE}-wal" ]]; then
+        warn "sqlite3 CLI not found and a WAL file is present — this backup might miss the most recent writes. For a guaranteed-consistent backup, prefer the web dashboard's Backup button or the Telegram bot."
+    fi
+
+    local ts dest
+    ts="$(date +%Y%m%d-%H%M%S)"
+    dest="${BACKUP_DIR}/monitorbot-${ts}.db"
+    cp "${DB_FILE}" "${dest}"
+    log "Backup saved: ${dest}"
+    pause
+}
+
+# ══════════════════════════════════════════════════════════════════
+#  6) Restore database
+# ══════════════════════════════════════════════════════════════════
+restore_database() {
+    mkdir -p "${BACKUP_DIR}"
+    local files=()
+    while IFS= read -r -d '' f; do files+=("$f"); done < <(find "${BACKUP_DIR}" -maxdepth 1 -name "*.db" -print0 2>/dev/null | sort -z)
+
+    if [[ ${#files[@]} -eq 0 ]]; then
+        err "No backups found in ${BACKUP_DIR}."
+        pause; return
+    fi
+
+    echo "Available backups:"
+    local i=1
+    for f in "${files[@]}"; do
+        echo "  ${i}) $(basename "${f}")"
+        i=$((i + 1))
+    done
+    read -rp "Pick a backup number to restore (0 to cancel): " choice
+    if [[ -z "${choice}" || "${choice}" == "0" ]]; then
+        warn "Cancelled."
+        pause; return
+    fi
+    local idx=$((choice - 1))
+    if [[ ${idx} -lt 0 || ${idx} -ge ${#files[@]} ]]; then
+        err "Invalid choice."
+        pause; return
+    fi
+    local picked="${files[$idx]}"
+
+    read -rp "This will OVERWRITE the current database with $(basename "${picked}"). Type yes to confirm: " confirm
+    if [[ "${confirm}" != "yes" ]]; then
+        warn "Cancelled."
+        pause; return
+    fi
+
+    local was_running=0
+    if command -v systemctl >/dev/null 2>&1 && service_exists && systemctl is-active --quiet "${CORE_SERVICE_NAME}"; then
+        check_root
+        log "Stopping Core service for a safe restore..."
+        systemctl stop "${CORE_SERVICE_NAME}"
+        was_running=1
+    fi
+
+    [[ -f "${DB_FILE}" ]] && cp "${DB_FILE}" "${DB_FILE}.before-restore" 2>/dev/null || true
+    cp "${picked}" "${DB_FILE}"
+    rm -f "${DB_FILE}-wal" "${DB_FILE}-shm"
+    log "Database restored from $(basename "${picked}")."
+
+    if [[ ${was_running} -eq 1 ]]; then
+        log "Restarting Core service..."
+        systemctl start "${CORE_SERVICE_NAME}"
+    fi
+    pause
+}
+
+# ══════════════════════════════════════════════════════════════════
+#  7) Full uninstall
 # ══════════════════════════════════════════════════════════════════
 uninstall_core() {
     check_root
-    echo -e "${RED}${BOLD}این عملیات سرویس Core را حذف می‌کند.${RESET}"
-    read -rp "برای تایید عبارت yes را تایپ کن: " confirm
+    echo -e "${RED}${BOLD}This will remove the Core service.${RESET}"
+    read -rp "Type yes to confirm: " confirm
     if [[ "${confirm}" != "yes" ]]; then
-        warn "لغو شد."
+        warn "Cancelled."
         pause; return
     fi
 
@@ -283,40 +406,43 @@ uninstall_core() {
     if [[ -f "${CORE_SERVICE_FILE}" ]]; then
         rm -f "${CORE_SERVICE_FILE}"
         command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload
-        log "سرویس Core حذف شد."
+        log "Core service removed."
     fi
 
-    read -rp "دیتابیس (monitorbot.db) هم حذف شود؟ تمام تاریخچه از بین می‌رود [y/N]: " del_db
+    read -rp "Also delete the database (monitorbot.db)? All history will be lost [y/N]: " del_db
     if [[ "${del_db}" =~ ^[Yy]$ ]]; then
-        rm -f "${SCRIPT_DIR}/monitorbot.db" "${SCRIPT_DIR}/monitorbot.db-wal" "${SCRIPT_DIR}/monitorbot.db-shm"
-        log "دیتابیس حذف شد."
+        rm -f "${DB_FILE}" "${DB_FILE}-wal" "${DB_FILE}-shm"
+        log "Database deleted."
     fi
 
-    read -rp "پوشه‌ی virtualenv (.venv) هم حذف شود؟ [y/N]: " del_venv
+    read -rp "Also delete the virtualenv (.venv)? [y/N]: " del_venv
     if [[ "${del_venv}" =~ ^[Yy]$ ]]; then
         rm -rf "${VENV_DIR}"
-        log "virtualenv حذف شد."
+        log "virtualenv deleted."
     fi
 
     echo ""
-    log "حذف کامل شد. فایل‌های سورس دست‌نخورده باقی ماندند (فقط سرویس/دیتابیس/venv حذف شد)."
+    log "Uninstall complete. Source files were left untouched (only the service/database/venv were removed)."
 }
 
 # ══════════════════════════════════════════════════════════════════
-#  حلقه‌ی اصلی منو
+#  main menu loop
 # ══════════════════════════════════════════════════════════════════
 main_loop() {
     while true; do
         print_banner
         print_menu
-        read -rp "یک گزینه انتخاب کن: " choice
+        read -rp "Choose an option: " choice
         case "${choice}" in
             1) install_core; pause ;;
             2) manage_service ;;
             3) update_system; pause ;;
-            4) uninstall_core; pause ;;
-            0) echo -e "${CYAN}خدانگهدار!${RESET}"; exit 0 ;;
-            *) err "گزینه نامعتبر."; pause ;;
+            4) edit_env; pause ;;
+            5) backup_database ;;
+            6) restore_database ;;
+            7) uninstall_core; pause ;;
+            0) echo -e "${C_AMBER}Goodbye!${RESET}"; exit 0 ;;
+            *) err "Invalid option."; pause ;;
         esac
     done
 }

@@ -49,3 +49,7 @@ MAX_LOG_ROWS_PER_SERVER = int(os.environ.get("MAX_LOG_ROWS_PER_SERVER", "2000"))
 SSH_CONNECT_TIMEOUT = float(os.environ.get("SSH_CONNECT_TIMEOUT", "20"))
 SSH_INSTALL_TIMEOUT = float(os.environ.get("SSH_INSTALL_TIMEOUT", "300"))
 AGENT_DEFAULT_PORT = int(os.environ.get("AGENT_DEFAULT_PORT", "5100"))
+
+# ─── گزارش دوره‌ای خلاصه (ربات تلگرام) — پیش‌فرض اولیه، بعداً از
+# ربات هم قابل تغییر است، بدون نیاز به ری‌استارت ───
+DEFAULT_SUMMARY_INTERVAL_HOURS = float(os.environ.get("SUMMARY_INTERVAL_HOURS", "24"))
