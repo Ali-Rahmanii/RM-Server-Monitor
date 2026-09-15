@@ -80,11 +80,14 @@ def _status_icon(status: str) -> str:
 _LOG_TAIL_LIMIT = 3000
 
 
-def _fmt_error_with_log(prefix: str, error: Optional[str], log: Optional[str]) -> str:
-    """پیام خطا + دنباله‌ی خروجی واقعی اسکریپت SSH (اگر باشد) را برای
-    ارسال در چت آماده می‌کند — دقیقاً همان چیزی که کاربر برای دیباگ
-    نصب/آپدیت/حذف از راه دور لازم دارد، بدون نیاز به journalctl."""
+def _fmt_error_with_log(prefix: str, error: Optional[str], log: Optional[str], hint: Optional[str] = None) -> str:
+    """پیام خطا + راه‌حل پیشنهادی (اگر الگوی شناخته‌شده‌ای تشخیص داده شده)
+    + دنباله‌ی خروجی واقعی اسکریپت SSH را برای ارسال در چت آماده می‌کند —
+    دقیقاً همان چیزی که کاربر برای دیباگ نصب/آپدیت/حذف از راه دور لازم
+    دارد، بدون نیاز به journalctl."""
     text = f"{prefix}: {html.escape(error or '-')}"
+    if hint:
+        text += f"\n\n\U0001F4A1 <b>Suggested fix:</b>\n{html.escape(hint)}"
     log = (log or "").strip()
     if log:
         tail = log[-_LOG_TAIL_LIMIT:]
@@ -336,7 +339,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             db.delete_server(server_id)
             await _edit_or_send(update, "\U0001F9E8 Agent uninstalled and server removed.", kb_servers())
         else:
-            await _edit_or_send(update, _fmt_error_with_log("❌ Uninstall failed", result["error"], result.get("log")), kb_server_detail(server))
+            await _edit_or_send(update, _fmt_error_with_log("❌ Uninstall failed", result["error"], result.get("log"), result.get("hint")), kb_server_detail(server))
 
     elif data == "settings:interval":
         await _edit_or_send(update, f"Current interval: <b>{scheduler.get_interval_minutes()} min</b>\nPick a new one:", kb_interval())
@@ -511,7 +514,7 @@ async def add_ssh_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         d["ip"], d["ssh_port"], d["ssh_username"], d.get("ssh_password"), d.get("ssh_private_key"),
     )
     if not result["ok"]:
-        await msg.edit_text(_fmt_error_with_log("❌ Install failed", result["error"], result.get("log")), parse_mode=ParseMode.HTML)
+        await msg.edit_text(_fmt_error_with_log("❌ Install failed", result["error"], result.get("log"), result.get("hint")), parse_mode=ParseMode.HTML)
         context.user_data.clear()
         return ConversationHandler.END
 

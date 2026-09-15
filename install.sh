@@ -89,11 +89,49 @@ ensure_python() {
         fi
     fi
 
-    # ماژول venv جدا از python3 اصلی پکیج‌بندی می‌شود (خصوصاً دبیان/اوبونتو)
-    if ! python3 -m venv --help >/dev/null 2>&1; then
-        log "ماژول venv پیدا نشد — تلاش برای نصب python3-venv..."
+    # نکته‌ی مهم: "python3 -m venv --help" حتی بدون ensurepip هم موفق
+    # برمی‌گردد (فقط متن راهنما را چاپ می‌کند) — پس این چک قدیمی هیچ‌وقت
+    # مشکل واقعی را تشخیص نمی‌داد. روی خیلی از اوبونتوهای جدید، پکیج
+    # عمومی python3-venv بدون بسته‌ی نسخه‌محورِ pythonX.Y-venv کامل
+    # نیست و ساخت واقعی virtualenv با خطای «ensurepip is not available»
+    # شکست می‌خورد. تنها راه مطمئن، یک تست واقعیِ ساخت venv است.
+    local test_dir venv_ok=0
+    test_dir="$(mktemp -d)"
+    if python3 -m venv "${test_dir}/venv" >/dev/null 2>&1 && [[ -x "${test_dir}/venv/bin/pip" ]]; then
+        venv_ok=1
+    fi
+    rm -rf "${test_dir}"
+
+    if [[ "${venv_ok}" -eq 0 ]]; then
+        log "ماژول venv کامل نیست (احتمالاً ensurepip موجود نیست) — تلاش برای نصب..."
         if command -v apt-get >/dev/null 2>&1; then
-            apt-get update -qq && apt-get install -y -qq python3-venv
+            apt-get update -qq
+            apt-get install -y -qq python3-venv python3-pip 2>/dev/null || true
+            # پکیج نسخه‌محور دقیق (مثلاً python3.12-venv) معمولاً همان
+            # چیزی است که واقعاً ensurepip را می‌آورد
+            local pyver
+            pyver="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || true)"
+            if [[ -n "${pyver}" ]]; then
+                apt-get install -y -qq "python${pyver}-venv" 2>/dev/null || true
+            fi
+        elif command -v dnf >/dev/null 2>&1; then
+            dnf install -y -q python3-pip >/dev/null 2>&1 || true
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y -q python3-pip >/dev/null 2>&1 || true
+        fi
+
+        # دوباره تست می‌کنیم — اگر بازم نشد، همینجا با پیام روشن متوقف
+        # می‌شویم به‌جای اینکه بذاریم setup_venv_and_service با خطای
+        # مبهم‌تر شکست بخورد
+        test_dir="$(mktemp -d)"
+        if python3 -m venv "${test_dir}/venv" >/dev/null 2>&1 && [[ -x "${test_dir}/venv/bin/pip" ]]; then
+            venv_ok=1
+        fi
+        rm -rf "${test_dir}"
+
+        if [[ "${venv_ok}" -eq 0 ]]; then
+            local pyver_hint="${pyver:-3.X}"
+            die "ساخت virtualenv پایتون ناموفق بود (ensurepip در دسترس نیست). این دستور را دستی روی سرور اجرا کن و دوباره تلاش کن: apt install -y python${pyver_hint}-venv"
         fi
     fi
 }

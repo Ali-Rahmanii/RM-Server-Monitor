@@ -29,6 +29,52 @@ _TOKEN_RE = re.compile(r"^AGENT_TOKEN=(.+)$", re.MULTILINE)
 _PORT_RE = re.compile(r"^AGENT_PORT=(\d+)$", re.MULTILINE)
 _STATUS_RE = re.compile(r"^STATUS=(\w+)$", re.MULTILINE)
 
+# الگوهای خطای شناخته‌شده روی سرور هدف — اگر پیدا شوند، به‌جای اینکه
+# کاربر خودش لاگ خام را بخواند، یک راه‌حل مشخص و قابل‌اجرا نشان
+# می‌دهیم (هم در پنل وب، هم در ربات تلگرام). انگلیسی نگه داشته شده
+# چون ربات تلگرام باید کاملاً انگلیسی بماند.
+_KNOWN_ISSUES = [
+    (
+        re.compile(r"ensurepip", re.IGNORECASE),
+        "The target server's Python venv package is incomplete. Run this on the target server manually and retry:\n"
+        "  apt install -y python3-venv   (or the exact version, e.g. python3.12-venv)",
+    ),
+    (
+        re.compile(r"Address already in use|Errno 98|در حال استفاده است", re.IGNORECASE),
+        "Port 5100 on the target is held by another process that isn't our own agent service "
+        "(a previous install would have been auto-updated instead of hitting this). "
+        "SSH into the target and check what's using it: sudo ss -ltnp | grep 5100",
+    ),
+    (
+        re.compile(r"Could not resolve host|Temporary failure in name resolution|Failed to fetch", re.IGNORECASE),
+        "The target server has no internet/DNS access (needed to install packages). Check its network connectivity.",
+    ),
+    (
+        re.compile(r"dpkg was interrupted|Could not get lock|/var/lib/dpkg/lock", re.IGNORECASE),
+        "The package manager (apt/dpkg) is locked on the target (maybe an automatic update is running). "
+        "Wait a few minutes and retry, or check on the server: sudo fuser /var/lib/dpkg/lock-frontend",
+    ),
+    (
+        re.compile(r"Authentication failed|Permission denied \(publickey", re.IGNORECASE),
+        "SSH authentication was rejected — double-check the username, password, or key.",
+    ),
+    (
+        re.compile(r"No space left on device", re.IGNORECASE),
+        "The target server's disk is full — free up space on it first.",
+    ),
+]
+
+
+def _diagnose(log: Optional[str]) -> Optional[str]:
+    """اگر متن لاگ با یکی از الگوهای شناخته‌شده مطابقت داشت، یک
+    راه‌حل ساده و قابل‌فهم برمی‌گرداند — وگرنه None."""
+    if not log:
+        return None
+    for pattern, hint in _KNOWN_ISSUES:
+        if pattern.search(log):
+            return hint
+    return None
+
 
 def _load_install_script() -> str:
     if not INSTALL_SH_PATH.exists():
@@ -150,11 +196,12 @@ def deploy_agent_via_ssh(
         client.close()
 
     combined_log = result["stdout"] + "\n" + result["stderr"]
+    hint = _diagnose(combined_log)
     if result["exit_status"] != 0:
         return {
             "ok": False,
             "error": f"اسکریپت نصب با کد خطای {result['exit_status']} تمام شد. جزئیات در لاگ.",
-            "token": None, "agent_port": None, "log": combined_log[-4000:],
+            "token": None, "agent_port": None, "log": combined_log[-4000:], "hint": hint,
         }
 
     token_match = _TOKEN_RE.search(result["stdout"])
@@ -169,7 +216,7 @@ def deploy_agent_via_ssh(
         return {
             "ok": False,
             "error": "نصب اجرا شد ولی توکن ایجنت در خروجی پیدا نشد — لاگ را بررسی کن.",
-            "token": None, "agent_port": None, "log": combined_log[-4000:],
+            "token": None, "agent_port": None, "log": combined_log[-4000:], "hint": hint,
         }
 
     return {
@@ -214,14 +261,15 @@ def update_agent_via_ssh(
         client.close()
 
     combined_log = result["stdout"] + "\n" + result["stderr"]
+    hint = _diagnose(combined_log)
     if result["exit_status"] != 0:
         return {"ok": False, "error": f"اسکریپت به‌روزرسانی با کد خطای {result['exit_status']} تمام شد.",
-                "log": combined_log[-4000:]}
+                "log": combined_log[-4000:], "hint": hint}
 
     status_match = _STATUS_RE.search(result["stdout"])
     if not status_match or status_match.group(1) != "UPDATED":
         return {"ok": False, "error": "اسکریپت اجرا شد ولی وضعیت UPDATED در خروجی دیده نشد — لاگ را بررسی کن.",
-                "log": combined_log[-4000:]}
+                "log": combined_log[-4000:], "hint": hint}
 
     return {"ok": True, "error": None, "log": combined_log[-4000:]}
 
@@ -257,6 +305,6 @@ def uninstall_agent_via_ssh(
     combined_log = result["stdout"] + "\n" + result["stderr"]
     if result["exit_status"] != 0:
         return {"ok": False, "error": f"اسکریپت حذف با کد خطای {result['exit_status']} تمام شد.",
-                "log": combined_log[-4000:]}
+                "log": combined_log[-4000:], "hint": _diagnose(combined_log)}
 
     return {"ok": True, "error": None, "log": combined_log[-4000:]}

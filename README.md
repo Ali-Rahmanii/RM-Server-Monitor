@@ -99,9 +99,11 @@ sudo bash rmserver.sh
 ```
 Choose **3) Update System** — this pulls the latest code, updates Python packages, restarts Core, and remotely re-runs the installer on every SSH-deployed agent to keep them current.
 
+The menu also has **4) Edit .env**, **5) Backup Database**, and **6) Restore Database** (lists backups from a local `backups/` folder and restores your pick).
+
 ### 🗑 Uninstalling
 
-`sudo bash rmserver.sh` → **4) Uninstall**. You'll be asked separately whether to also delete the database and the virtualenv; source files are left untouched.
+`sudo bash rmserver.sh` → **7) Uninstall**. You'll be asked separately whether to also delete the database and the virtualenv, and — as a final, explicitly-confirmed step — whether to remove the entire installation and the global `rmmonitor` command too. Skip that last step and source files are left untouched.
 
 ### 📂 Project Structure
 
@@ -115,6 +117,15 @@ RM-Server-Monitor/
 ├── main.py            # Core entry point
 └── requirements.txt
 ```
+
+### 🛠 Troubleshooting SSH Deploy / Update Failures
+
+If adding, updating, or remote-uninstalling a server via SSH fails, the web dashboard and the Telegram bot both now show the **actual output** of the remote install script, plus a suggested fix when the error matches a known pattern. You don't need to SSH in and dig through `journalctl` for these — a few common ones:
+
+- **`ensurepip is not available` / venv creation fails** — the target server's `python3-venv` package is incomplete (common on newer Ubuntu images, where the version-specific package like `python3.12-venv` isn't pulled in automatically). `install.sh` now detects this with a real functional test (not just `--help`) and tries to install the exact matching package automatically; if it still fails, run the command it prints (e.g. `apt install -y python3.12-venv`) on the target server yourself and retry.
+- **"Port 5100 already in use"** — if it's our own agent already running there (re-adding a server, retrying a failed deploy), `install.sh` now detects that automatically and updates in place instead of requiring a manual `--uninstall` first. If it's genuinely something else on that port, SSH in and check with `sudo ss -ltnp | grep 5100`.
+- **Core service seems "stuck" on restart** — check `sudo journalctl -u monitorbot-core -n 100 --no-pager` for the actual error; a shutdown deadlock that could cause this (introduced by the periodic summary report feature) has been fixed, and the service unit now also caps shutdown at 20s instead of systemd's 90s default as a safety net.
+- **`rmmonitor` → "Permission denied" after an update, or "command not found" under `sudo`** — the former was a real bug (fixed: the repo's shell scripts are now correctly tracked as executable in git, so a fresh clone or update always extracts them that way); the latter usually means `/usr/local/bin` isn't in `sudo`'s `secure_path` on that particular server — `bash /opt/RM-Server-Monitor/rmserver.sh` always works regardless of PATH.
 
 ### 🔒 Security Notes
 
@@ -204,9 +215,20 @@ sudo bash rmserver.sh
 ```
 گزینه‌ی **۳) به‌روزرسانی سیستم** را انتخاب کن — آخرین کد را از گیت می‌گیرد، پکیج‌های پایتون را به‌روز می‌کند، Core را ری‌استارت می‌کند، و نصب‌کننده را از راه دور روی همه‌ی ایجنت‌های نصب‌شده با SSH دوباره اجرا می‌کند تا آن‌ها هم به‌روز بمانند.
 
+منو گزینه‌های **۴) ویرایش .env**، **۵) بکاپ دیتابیس** و **۶) بازیابی دیتابیس** (لیست بکاپ‌های پوشه‌ی `backups/` و انتخاب برای بازگردانی) را هم دارد.
+
 ### 🗑 حذف
 
-`sudo bash rmserver.sh` ← **۴) حذف کامل**. جداگانه از تو می‌پرسد که آیا دیتابیس و virtualenv هم حذف شوند؛ فایل‌های سورس دست‌نخورده باقی می‌مانند.
+`sudo bash rmserver.sh` ← **۷) حذف کامل**. جداگانه از تو می‌پرسد که آیا دیتابیس و virtualenv هم حذف شوند، و به‌عنوان آخرین مرحله (با تایید صریح جداگانه) اینکه آیا کل نصب و دستور سراسری `rmmonitor` هم پاک شود یا نه. اگه اون مرحله‌ی آخر رو رد کنی، فایل‌های سورس دست‌نخورده باقی می‌مانند.
+
+### 🛠 رفع اشکال خطاهای نصب/آپدیت SSH
+
+اگه اضافه‌کردن، آپدیت یا حذفِ از راه دورِ یه سرور با SSH شکست خورد، الان هم پنل وب و هم ربات تلگرام **خروجی واقعیِ** اسکریپت نصب روی سرور هدف رو نشون می‌دن، به‌علاوه یه راه‌حل پیشنهادی اگه خطا با یکی از الگوهای شناخته‌شده مطابقت داشته باشه — دیگه لازم نیست خودت بری `journalctl` رو بگردی. چندتا از رایج‌ترین‌ها:
+
+- **`ensurepip is not available` / ساخت venv شکست می‌خوره** — پکیج `python3-venv` روی سرور هدف ناقصه (خیلی رایج روی اوبونتوهای جدید، جایی که پکیج نسخه‌محور مثل `python3.12-venv` خودکار نصب نمی‌شه). `install.sh` الان این مورد رو با یه تست واقعی (نه فقط `--help`) تشخیص می‌ده و خودش سعی می‌کنه پکیج دقیق رو نصب کنه؛ اگه بازم نشد، همون دستوری که چاپ می‌کنه (مثلاً `apt install -y python3.12-venv`) رو دستی روی سرور هدف بزن و دوباره تلاش کن.
+- **«پورت 5100 از قبل در حال استفاده است»** — اگه خودِ همین ایجنت قبلاً روی همون سرور نصب بوده (دوباره اضافه‌کردن یه سرور، یا تلاش مجدد بعد از یه دیپلوی ناموفق)، `install.sh` الان خودش این رو تشخیص می‌ده و به‌جای نیاز به `--uninstall` دستی، خودکار آپدیتش می‌کنه. اگه واقعاً یه چیز دیگه روی اون پورته، SSH بزن و چک کن: `sudo ss -ltnp | grep 5100`
+- **سرویس Core موقع Restart «گیر» می‌کنه** — لاگ واقعی رو با `sudo journalctl -u monitorbot-core -n 100 --no-pager` ببین؛ یه باگ deadlock توی خاموش‌شدن (که ویژگی گزارش دوره‌ای باعثش شده بود) درست شده، و فایل سرویس هم الان حداکثر ۲۰ ثانیه صبر می‌کنه نه ۹۰ ثانیه‌ی پیش‌فرض systemd.
+- **`rmmonitor` بعد از آپدیت «Permission denied» می‌ده، یا زیر `sudo` می‌گه «command not found»** — مورد اول یه باگ واقعی بود (درست شد: اسکریپت‌های شل الان توی خودِ گیت هم به‌درستی اجرایی علامت‌گذاری شدن، پس هر کلون یا آپدیتی همیشه همینطور می‌مونه)؛ مورد دوم معمولاً یعنی `/usr/local/bin` توی `secure_path` تنظیمات `sudo` همون سرور خاص نیست — `bash /opt/RM-Server-Monitor/rmserver.sh` همیشه بدون وابستگی به PATH کار می‌کنه.
 
 ### 🔒 نکات امنیتی
 
