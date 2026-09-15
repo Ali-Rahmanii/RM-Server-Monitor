@@ -66,23 +66,70 @@ load_env_var() {
 }
 
 # ══════════════════════════════════════════════════════════════════
-#  banner
+#  banner — bordered box with computed centering (not hand-counted
+#  spaces), so it stays perfectly aligned no matter what
 # ══════════════════════════════════════════════════════════════════
+BANNER_WIDTH=62
+
+# متن ساده (بدون کد رنگ) را داخل عرض ثابت وسط‌چین می‌کند. برای رشته‌های
+# حاوی کاراکترهای چندبایتی یونیکد (بلوک‌های ASCII art)، عرض واقعی را
+# صریح به‌عنوان آرگومان دوم بده — چون ${#text} بسته به locale ممکن است
+# بایت بشمارد نه کاراکتر، و وسط‌چینی را به‌هم می‌ریزد.
+_center() {
+    local text="$1" visual_len="${2:-${#1}}" pad left right
+    pad=$(( BANNER_WIDTH - visual_len ))
+    (( pad < 0 )) && pad=0
+    left=$(( pad / 2 ))
+    right=$(( pad - left ))
+    printf '%*s%s%*s' "${left}" "" "${text}" "${right}" ""
+}
+
+_hr() {
+    local line="" i
+    for (( i = 0; i < BANNER_WIDTH; i++ )); do line+="═"; done
+    echo -e "${C_VIOLET}${1}${line}${2}${RESET}"
+}
+
+_box_line() {
+    local content_color="$1" text="$2" visual_len="${3:-}" centered
+    if [[ -n "${visual_len}" ]]; then
+        centered="$(_center "${text}" "${visual_len}")"
+    else
+        centered="$(_center "${text}")"
+    fi
+    echo -e "${C_VIOLET}║${RESET}${content_color}${centered}${RESET}${C_VIOLET}║${RESET}"
+}
+
+_box_blank() {
+    local spaces
+    printf -v spaces '%*s' "${BANNER_WIDTH}" ""
+    echo -e "${C_VIOLET}║${RESET}${spaces}${C_VIOLET}║${RESET}"
+}
+
 print_banner() {
     clear
-    echo -e "${C_PURPLE}${BOLD} ██████╗ ███╗   ███╗${RESET}"
-    echo -e "${C_VIOLET}${BOLD} ██╔══██╗████╗ ████║${RESET}"
-    echo -e "${C_MAGENTA}${BOLD} ██████╔╝██╔████╔██║${RESET}"
-    echo -e "${C_PINK}${BOLD} ██╔══██╗██║╚██╔╝██║${RESET}"
-    echo -e "${C_ORANGE}${BOLD} ██║  ██║██║ ╚═╝ ██║${RESET}"
-    echo -e "${C_YELLOW}${BOLD} ╚═╝  ╚═╝╚═╝     ╚═╝${RESET}"
-    echo -e "${C_HOTPINK}${BOLD}     S E R V E R   M O N I T O R${RESET}"
-    echo -e "${DIM}     ─────────────────────────────────────${RESET}"
-    echo -e "${BOLD}     Developer:${RESET} ${C_AMBER}Ali Rahmani${RESET}"
-    echo -e "${BOLD}     Telegram :${RESET} ${C_AMBER}@a_alirahmani${RESET}"
-    echo -e "${BOLD}     GitHub   :${RESET} ${C_AMBER}https://github.com/Ali-Rahmanii/RM-Server-Monitor${RESET}"
-    echo -e "${DIM}     ─────────────────────────────────────${RESET}"
-    echo -e "     ${C_YELLOW}Version ${VERSION}${RESET}   ${DIM}·${RESET}   run ${BOLD}sudo rmmonitor${RESET} anytime, from anywhere"
+    _hr "╔" "╗"
+    _box_blank
+    _box_line "${C_PURPLE}${BOLD}"  " ██████╗ ███╗   ███╗" 20
+    _box_line "${C_VIOLET}${BOLD}"  " ██╔══██╗████╗ ████║" 20
+    _box_line "${C_MAGENTA}${BOLD}" " ██████╔╝██╔████╔██║" 20
+    _box_line "${C_PINK}${BOLD}"    " ██╔══██╗██║╚██╔╝██║" 20
+    _box_line "${C_ORANGE}${BOLD}"  " ██║  ██║██║ ╚═╝ ██║" 20
+    _box_line "${C_YELLOW}${BOLD}"  " ╚═╝  ╚═╝╚═╝     ╚═╝" 20
+    _box_blank
+    _box_line "${C_HOTPINK}${BOLD}" "S E R V E R   M O N I T O R"
+    _box_blank
+    _hr "╠" "╣"
+    _box_blank
+    _box_line "${C_YELLOW}${BOLD}" "Version ${VERSION}"
+    _box_blank
+    _box_line "${C_AMBER}" "https://github.com/Ali-Rahmanii/RM-Server-Monitor"
+    _box_blank
+    _box_line "${BOLD}" "by Ali Rahmani   ·   Telegram: @a_alirahmani" 44
+    _box_blank
+    _hr "╚" "╝"
+    echo ""
+    echo -e "${DIM}  run ${RESET}${BOLD}sudo rmmonitor${RESET}${DIM} anytime, from anywhere${RESET}"
     echo ""
 }
 
@@ -172,6 +219,7 @@ EnvironmentFile=${ENV_FILE}
 ExecStart=${VENV_DIR}/bin/python ${SCRIPT_DIR}/main.py
 Restart=always
 RestartSec=5
+TimeoutStopSec=20
 User=root
 
 [Install]

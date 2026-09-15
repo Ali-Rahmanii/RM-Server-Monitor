@@ -57,6 +57,12 @@ async def main() -> None:
         logger.info("سیگنال توقف دریافت شد، در حال خاموش‌شدن...")
         stop_event.set()
         scheduler.stop_scheduler()
+        # اگر این فراموش بشه، وقتی ربات فعاله summary_loop() توی
+        # asyncio.gather() هیچ‌وقت تمام نمی‌شه (چون استاپ‌ایوینتش ست
+        # نشده) و کل پروسه هیچ‌وقت از SIGTERM خارج نمی‌شه — سرویس
+        # systemd مجبور می‌شه بعد از timeout پیش‌فرض (۹۰ ثانیه) با
+        # SIGKILL بکشدش، که یعنی هر «restart» عملاً هنگ به نظر می‌رسه.
+        scheduler.stop_summary_loop()
 
     # روی ویندوز، signal.SIGTERM handler ممکن است در دسترس نباشد —
     # از add_signal_handler که آنجا پشتیبانی نمی‌شود صرف‌نظر می‌کنیم.
