@@ -471,13 +471,19 @@ ENV_EOF
         write_systemd_service
         systemctl daemon-reload
         systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1 || true
-        systemctl restart "${SERVICE_NAME}"
+        # قبل از restart، هر پروسه‌ی یتیم/زامبی‌ای که احتمالاً بیرون از
+        # مدیریت systemd (مثلاً از یک نصب دستی/قدیمی) روی همین پورت
+        # مانده باشد را هم می‌کشیم — چون systemctl restart فقط پروسه‌ی
+        # خودِ این یونیت را مدیریت می‌کند، نه یک orphan جدا
+        systemctl stop "${SERVICE_NAME}" >/dev/null 2>&1 || true
+        pkill -f "${INSTALL_DIR}/venv/bin/python.*agent\.py" 2>/dev/null || true
+        sleep 1
+        systemctl start "${SERVICE_NAME}"
 
-        sleep 2
-        if systemctl is-active --quiet "${SERVICE_NAME}"; then
-            log "سرویس ${SERVICE_NAME} فعال است."
-        else
-            err "سرویس بالا نیامد. لاگ را با این دستور ببین: journalctl -u ${SERVICE_NAME} -n 50"
+        sleep 3
+        if ! systemctl is-active --quiet "${SERVICE_NAME}"; then
+            err "سرویس بالا نیامد."
+            journalctl -u "${SERVICE_NAME}" -n 30 --no-pager 2>/dev/null || true
             exit 1
         fi
     else
@@ -488,11 +494,32 @@ ENV_EOF
         sleep 2
     fi
 
-    # چک سلامت نهایی
-    if (echo > "/dev/tcp/127.0.0.1/${AGENT_PORT}") 2>/dev/null; then
+    # چک سلامت نهایی — چند بار با فاصله امتحان می‌کنیم، چون گاهی
+    # سرویس بین «active شدن» و واقعاً گوش‌دادن روی پورت چند صدم ثانیه
+    # فاصله دارد (به‌خصوص بلافاصله بعد از پکیج‌های تازه‌نصب‌شده)
+    local health_ok=0 attempt
+    for attempt in 1 2 3 4 5; do
+        if (echo > "/dev/tcp/127.0.0.1/${AGENT_PORT}") 2>/dev/null; then
+            health_ok=1
+            break
+        fi
+        sleep 2
+    done
+
+    if [[ "${health_ok}" -eq 1 ]]; then
         log "ایجنت روی پورت ${AGENT_PORT} در حال گوش‌دادن است."
     else
         err "ایجنت روی پورت ${AGENT_PORT} پاسخ نمی‌دهد."
+        # تشخیص خودکار: اگر چیزی (حتی خودِ سرویس در حلقه‌ی crash) روی
+        # این پورت است، همینجا نشانش بده — دیگر نیازی به SSH دستی نیست
+        if command -v ss >/dev/null 2>&1; then
+            echo "--- ss -ltnp | grep ${AGENT_PORT} ---"
+            ss -ltnp 2>/dev/null | grep ":${AGENT_PORT}" || echo "(چیزی در حال گوش‌دادن روی این پورت دیده نشد)"
+        fi
+        if command -v systemctl >/dev/null 2>&1; then
+            echo "--- journalctl -u ${SERVICE_NAME} -n 30 ---"
+            journalctl -u "${SERVICE_NAME}" -n 30 --no-pager 2>/dev/null || true
+        fi
         exit 1
     fi
 

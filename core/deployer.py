@@ -41,9 +41,8 @@ _KNOWN_ISSUES = [
     ),
     (
         re.compile(r"Address already in use|Errno 98|در حال استفاده است", re.IGNORECASE),
-        "Port 5100 on the target is held by another process that isn't our own agent service "
-        "(a previous install would have been auto-updated instead of hitting this). "
-        "SSH into the target and check what's using it: sudo ss -ltnp | grep 5100",
+        "Port 5100 on the target keeps failing to bind — check the “ss -ltnp” / journalctl output "
+        "included above in the log for what's actually holding it (or crashing).",
     ),
     (
         re.compile(r"Could not resolve host|Temporary failure in name resolution|Failed to fetch", re.IGNORECASE),
