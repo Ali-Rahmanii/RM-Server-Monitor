@@ -70,7 +70,7 @@ if ! command -v rmmonitor >/dev/null 2>&1; then
 fi
 
 echo ""
-log "Setup complete! From now on, anywhere, just type: ${BOLD}rmmonitor${RESET}"
+log "Setup complete! From now on, anywhere, just type: ${BOLD}sudo rmmonitor${RESET}"
 echo ""
 sleep 1
 

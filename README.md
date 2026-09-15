@@ -58,7 +58,7 @@ This clones the repo to `/opt/RM-Server-Monitor`, creates a global `rmmonitor` c
 From now on, open the menu **anytime, from anywhere**, by just typing:
 
 ```bash
-rmmonitor
+sudo rmmonitor
 ```
 
 <details>
@@ -163,7 +163,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/Ali-Rahmanii/RM-Server-Monitor
 از این به بعد، **هر وقت و هرجا** خواستی منو را دوباره باز کنی، کافیه بنویسی:
 
 ```bash
-rmmonitor
+sudo rmmonitor
 ```
 
 <details>

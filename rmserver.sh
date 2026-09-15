@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # RM Server Monitor — main Core management script.
-# Run: bash rmserver.sh   (use sudo for install/service/uninstall options)
-# Or from anywhere via the global command: rmmonitor  (symlink created by setup.sh)
+# Almost everything here touches root-owned files/services, so run it
+# with sudo: sudo bash rmserver.sh
+# Or from anywhere via the global command: sudo rmmonitor  (symlink created by setup.sh)
 #
 set -uo pipefail
 
@@ -81,7 +82,7 @@ print_banner() {
     echo -e "${BOLD}     Telegram :${RESET} ${C_AMBER}@a_alirahmani${RESET}"
     echo -e "${BOLD}     GitHub   :${RESET} ${C_AMBER}https://github.com/Ali-Rahmanii/RM-Server-Monitor${RESET}"
     echo -e "${DIM}     ─────────────────────────────────────${RESET}"
-    echo -e "     ${C_YELLOW}Version ${VERSION}${RESET}   ${DIM}·${RESET}   run ${BOLD}rmmonitor${RESET} anytime, from anywhere"
+    echo -e "     ${C_YELLOW}Version ${VERSION}${RESET}   ${DIM}·${RESET}   run ${BOLD}sudo rmmonitor${RESET} anytime, from anywhere"
     echo ""
 }
 
@@ -227,11 +228,36 @@ manage_service() {
 #  3) Full system update
 # ══════════════════════════════════════════════════════════════════
 update_system() {
+    # نصب اصلی معمولاً با root انجام شده (setup.sh با sudo اجرا می‌شود)،
+    # پس فایل‌های .git/venv/service هم مالک root دارند — بدون root این
+    # مرحله با خطای permission denied بی‌سروصدا شکست می‌خورد.
+    check_root
     log "Starting update..."
+    local git_updated=0
 
     if [[ -d "${SCRIPT_DIR}/.git" ]]; then
         log "Pulling the latest version from git..."
-        (cd "${SCRIPT_DIR}" && git pull) || warn "git pull failed — continuing with the current version on disk."
+        # از "git pull" ساده استفاده نمی‌کنیم چون روی سرورهای تازه که
+        # تنظیمات pull.rebase/pull.ff ست نشده، یا روی کلون‌های shallow
+        # (--depth 1 که setup.sh می‌سازد)، معمولاً با خطای "divergent
+        # branches" شکست می‌خورد. fetch + reset --hard همیشه کار می‌کند
+        # و دقیقاً working tree را با آخرین نسخه‌ی main یکی می‌کند —
+        # فایل‌های .env/monitorbot.db/.venv/backups چون در .gitignore
+        # هستند دست‌نخورده می‌مانند.
+        local before after
+        before="$(cd "${SCRIPT_DIR}" && git rev-parse HEAD 2>/dev/null)"
+        if (cd "${SCRIPT_DIR}" && git fetch --all --quiet && git reset --hard origin/main --quiet); then
+            after="$(cd "${SCRIPT_DIR}" && git rev-parse HEAD 2>/dev/null)"
+            if [[ "${before}" != "${after}" ]]; then
+                log "Repository updated: ${before:0:7} → ${after:0:7}"
+                git_updated=1
+            else
+                log "Already up to date (${after:0:7})."
+            fi
+        else
+            err "git update failed — see the error output above."
+            warn "Continuing with the current version on disk."
+        fi
     else
         warn "This folder isn't a git repo — skipping git pull."
     fi
@@ -272,6 +298,12 @@ update_system() {
 
     echo ""
     log "Update finished."
+
+    if [[ "${git_updated}" -eq 1 ]]; then
+        pause
+        log "Restarting the menu with the freshly pulled code..."
+        exec bash "${SCRIPT_DIR}/rmserver.sh"
+    fi
 }
 
 # ══════════════════════════════════════════════════════════════════
@@ -422,7 +454,30 @@ uninstall_core() {
     fi
 
     echo ""
+    echo -e "${RED}${BOLD}Also remove the entire installation itself?${RESET}"
+    echo "This deletes ${SCRIPT_DIR} completely (the whole repo/script) and the"
+    echo "global 'rmmonitor' command. You would need to re-run the curl installer"
+    echo "or 'git clone' again to use RM Server Monitor after this."
+    read -rp "Type DELETE (all caps) to confirm full removal, or press Enter to skip: " full_confirm
+
+    if [[ "${full_confirm}" == "DELETE" ]]; then
+        rm -f "/usr/local/bin/rmmonitor"
+        log "Global 'rmmonitor' command removed."
+        log "Deleting ${SCRIPT_DIR} ..."
+        # این آخرین کاری است که این اسکریپت انجام می‌دهد — بعد از این
+        # هیچ خط دیگری از فایل خوانده نمی‌شود (exit بلافاصله بعدش)،
+        # پس امن است که پوشه‌ی خودِ اسکریپت را همین‌جا حذف کنیم.
+        local self_dir="${SCRIPT_DIR}"
+        cd /
+        rm -rf "${self_dir}"
+        echo ""
+        echo -e "${C_AMBER}RM Server Monitor has been completely removed. Goodbye!${RESET}"
+        exit 0
+    fi
+
+    echo ""
     log "Uninstall complete. Source files were left untouched (only the service/database/venv were removed)."
+    log "Run this menu again anytime with 'rmmonitor', or choose full removal next time to delete everything."
 }
 
 # ══════════════════════════════════════════════════════════════════
@@ -446,5 +501,15 @@ main_loop() {
         esac
     done
 }
+
+# نصب اصلی معمولاً با sudo انجام می‌شود (setup.sh این‌طور است)، پس
+# تقریباً همه‌ی گزینه‌های این منو (git/venv/service/.env/دیتابیس) روی
+# فایل‌های مالکِ root کار می‌کنند. به‌جای اینکه هر گزینه بی‌سروصدا با
+# permission denied شکست بخورد، همینجا صریح و زود از کاربر می‌خواهیم.
+if [[ "${EUID}" -ne 0 ]]; then
+    echo -e "${RED}${BOLD}RM Server Monitor needs root to manage services, git, and files under ${SCRIPT_DIR}.${RESET}"
+    echo -e "Re-run with: ${BOLD}sudo rmmonitor${RESET}  (or: sudo bash rmserver.sh)"
+    exit 1
+fi
 
 main_loop
