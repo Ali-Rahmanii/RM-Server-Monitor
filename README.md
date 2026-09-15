@@ -35,22 +35,39 @@ RM Server Monitor is a two-part system for keeping an eye on a fleet of Linux se
 - **Top Consumers** — per-server live list of the heaviest CPU/RAM processes.
 - **Telegram bot** — `/servers`, `/status`, `/statusall`, `/top`, `/addserver`, `/delserver`, `/setinterval`, with automatic down/recovered/threshold alerts (sent only on state change, not spammed every cycle).
 - **SSH Auto-Deploy** — add a server by IP + SSH credentials from the dashboard; Core SSHes in, installs the agent, and registers it automatically. One click to remotely uninstall it too.
+- **One-line install** — `bash <(curl -Ls .../setup.sh)` clones the repo, sets up a global `rmmonitor` command, and drops you straight into the menu.
 - **`install.sh`** — a self-contained installer/uninstaller/updater for the agent, with a `systemd` service (`monitorbot-agent`), safe port-in-use pre-check, and idempotent updates that preserve the existing token.
 - **`rmserver.sh`** — an interactive, colored CLI menu to install Core as a `systemd` service, manage it, pull updates (and cascade the update to every SSH-deployed agent), or cleanly uninstall.
 - **Systemd support** end-to-end — both Agent and Core can run as always-on, auto-restarting services.
 
 ### 🚀 Quick Start
 
+One command, that's it:
+
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/Ali-Rahmanii/RM-Server-Monitor/main/setup.sh)
+```
+
+This clones the repo to `/opt/RM-Server-Monitor`, creates a global `rmmonitor` command, and immediately opens the interactive menu. From there pick **1) Install Core System** — it will:
+1. Create a Python virtualenv and install dependencies.
+2. Copy `.env.example` → `.env` (edit this afterwards — at minimum change `WEB_PASSWORD`, and set `TELEGRAM_BOT_TOKEN` / `TELEGRAM_ADMIN_IDS` if you want the bot active).
+3. Create and start a `monitorbot-core` systemd service.
+
+From now on, open the menu **anytime, from anywhere**, by just typing:
+
+```bash
+rmmonitor
+```
+
+<details>
+<summary>Prefer manual clone?</summary>
+
 ```bash
 git clone https://github.com/Ali-Rahmanii/RM-Server-Monitor.git
 cd RM-Server-Monitor
 sudo bash rmserver.sh
 ```
-
-Pick **1) Install Core System** from the menu. It will:
-1. Create a Python virtualenv and install dependencies.
-2. Copy `.env.example` → `.env` (edit this afterwards — at minimum change `WEB_PASSWORD`, and set `TELEGRAM_BOT_TOKEN` / `TELEGRAM_ADMIN_IDS` if you want the bot active).
-3. Create and start a `monitorbot-core` systemd service.
+</details>
 
 ### 🌐 Using the Dashboard
 
@@ -86,8 +103,9 @@ Choose **3) Update System** — this pulls the latest code, updates Python packa
 RM-Server-Monitor/
 ├── agent/            # Lightweight monitoring API (deploy to each target server)
 ├── core/              # Dashboard, scheduler, Telegram bot, SSH deployer
+├── setup.sh            # One-line curl installer (clones repo, creates `rmmonitor`)
 ├── install.sh         # Self-contained agent installer/updater/uninstaller
-├── rmserver.sh         # Interactive Core management CLI
+├── rmserver.sh         # Interactive Core management CLI (aliased as `rmmonitor`)
 ├── main.py            # Core entry point
 └── requirements.txt
 ```
@@ -116,22 +134,39 @@ RM Server Monitor یک سیستم مانیتورینگ دو بخشی برای م
 - **پرمصرف‌ترین‌ها** — لیست زنده‌ی پردازش‌های پرمصرف CPU/RAM هر سرور.
 - **ربات تلگرام** — دستورات `/servers`، `/status`، `/statusall`، `/top`، `/addserver`، `/delserver`، `/setinterval` با هشدار خودکار قطعی/بازگشت/عبور از آستانه (فقط روی تغییر وضعیت، بدون اسپم).
 - **استقرار خودکار SSH** — افزودن سرور فقط با آی‌پی و اطلاعات SSH از داخل داشبورد؛ سیستم مرکزی خودش وصل می‌شود، ایجنت را نصب و ثبت می‌کند. حذف از راه دور هم با یک کلیک.
+- **نصب یک‌خطی** — با `bash <(curl -Ls .../setup.sh)` مخزن کلون می‌شود، دستور سراسری `rmmonitor` ساخته می‌شود، و مستقیم وارد منو می‌شوی.
 - **`install.sh`** — نصب/حذف/به‌روزرسانی خودکفای ایجنت، با سرویس systemd (`monitorbot-agent`)، بررسی امن اشغال‌نبودن پورت، و به‌روزرسانی idempotent که توکن موجود را حفظ می‌کند.
 - **`rmserver.sh`** — منوی رنگی و تعاملی برای نصب Core به‌عنوان سرویس systemd، مدیریت آن، دریافت آپدیت (و انتقال آپدیت به همه‌ی ایجنت‌های نصب‌شده با SSH)، یا حذف تمیز.
 - **پشتیبانی کامل از systemd** — هم Agent و هم Core می‌توانند به‌صورت سرویس همیشه-روشن با auto-restart اجرا شوند.
 
 ### 🚀 شروع سریع
 
+فقط یک دستور:
+
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/Ali-Rahmanii/RM-Server-Monitor/main/setup.sh)
+```
+
+این دستور مخزن را در `/opt/RM-Server-Monitor` کلون می‌کند، دستور سراسری `rmmonitor` را می‌سازد، و بلافاصله منوی تعاملی را باز می‌کند. از آنجا گزینه‌ی **۱) نصب سیستم مرکزی** را انتخاب کن — این کار:
+۱. یک virtualenv پایتون می‌سازد و وابستگی‌ها را نصب می‌کند.
+۲. فایل `.env.example` را در `.env` کپی می‌کند (بعداً حتماً ویرایشش کن — حداقل `WEB_PASSWORD` را عوض کن، و اگر می‌خواهی ربات فعال باشد `TELEGRAM_BOT_TOKEN`/`TELEGRAM_ADMIN_IDS` را هم تنظیم کن).
+۳. سرویس systemd به اسم `monitorbot-core` می‌سازد و اجرا می‌کند.
+
+از این به بعد، **هر وقت و هرجا** خواستی منو را دوباره باز کنی، کافیه بنویسی:
+
+```bash
+rmmonitor
+```
+
+<details>
+<summary>ترجیح می‌دهی دستی کلون کنی؟</summary>
+
 ```bash
 git clone https://github.com/Ali-Rahmanii/RM-Server-Monitor.git
 cd RM-Server-Monitor
 sudo bash rmserver.sh
 ```
-
-از منو گزینه‌ی **۱) نصب سیستم مرکزی** را انتخاب کن. این کار:
-۱. یک virtualenv پایتون می‌سازد و وابستگی‌ها را نصب می‌کند.
-۲. فایل `.env.example` را در `.env` کپی می‌کند (بعداً حتماً ویرایشش کن — حداقل `WEB_PASSWORD` را عوض کن، و اگر می‌خواهی ربات فعال باشد `TELEGRAM_BOT_TOKEN`/`TELEGRAM_ADMIN_IDS` را هم تنظیم کن).
-۳. سرویس systemd به اسم `monitorbot-core` می‌سازد و اجرا می‌کند.
+</details>
 
 ### 🌐 استفاده از داشبورد
 

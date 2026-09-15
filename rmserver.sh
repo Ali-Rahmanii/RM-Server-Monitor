@@ -2,11 +2,27 @@
 #
 # RM Server Monitor — اسکریپت اصلی مدیریت سیستم مرکزی (Core).
 # اجرا: bash rmserver.sh   (برای گزینه‌های نصب/سرویس/حذف با sudo اجرا کن)
+# یا از هرجایی با دستور سراسری: rmmonitor  (سیم‌لینکی که setup.sh می‌سازد)
 #
 set -uo pipefail
 
 VERSION="v1.0.0"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# این اسکریپت معمولاً از راه یک symlink در /usr/local/bin/rmmonitor صدا
+# زده می‌شود — $BASH_SOURCE در آن حالت به مسیر symlink اشاره می‌کند نه
+# مسیر واقعی فایل، پس صریحاً symlink را دنبال می‌کنیم تا SCRIPT_DIR
+# همیشه به /opt/RM-Server-Monitor (یا هرجا واقعاً کلون شده) برسد.
+_resolve_script_dir() {
+    local src="${BASH_SOURCE[0]}"
+    while [[ -h "${src}" ]]; do
+        local dir
+        dir="$(cd -P "$(dirname "${src}")" && pwd)"
+        src="$(readlink "${src}")"
+        [[ "${src}" != /* ]] && src="${dir}/${src}"
+    done
+    cd -P "$(dirname "${src}")" && pwd
+}
+SCRIPT_DIR="$(_resolve_script_dir)"
 CORE_SERVICE_NAME="monitorbot-core"
 CORE_SERVICE_FILE="/etc/systemd/system/${CORE_SERVICE_NAME}.service"
 VENV_DIR="${SCRIPT_DIR}/.venv"
@@ -58,7 +74,7 @@ BANNER
     echo -e "${BOLD}     Telegram :${RESET} ${CYAN}@a_alirahmani${RESET}"
     echo -e "${BOLD}     GitHub   :${RESET} ${CYAN}https://github.com/Ali-Rahmanii/RM-Server-Monitor${RESET}"
     echo -e "${DIM}     ─────────────────────────────────────${RESET}"
-    echo -e "     ${YELLOW}Version ${VERSION}${RESET}"
+    echo -e "     ${YELLOW}Version ${VERSION}${RESET}   ${DIM}·${RESET}   هر جا بودی، این منو را با تایپ ${BOLD}rmmonitor${RESET} باز کن"
     echo ""
 }
 
