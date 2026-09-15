@@ -46,7 +46,22 @@ fi
 # ── clone or update the repo ──
 if [[ -d "${INSTALL_DIR}/.git" ]]; then
     log "Existing install found at ${INSTALL_DIR} — updating..."
-    git -C "${INSTALL_DIR}" pull --ff-only || warn "git pull failed — continuing with the current version on disk."
+    # Plain "git pull --ff-only" routinely fails on a shallow clone
+    # (this repo is cloned with --depth 1 below) or on a fresh server
+    # with no pull.rebase/pull.ff configured — fetch + reset --hard is
+    # bulletproof against both and always lands exactly on origin/main.
+    before="$(git -C "${INSTALL_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)"
+    if git -C "${INSTALL_DIR}" fetch --all --quiet && git -C "${INSTALL_DIR}" reset --hard origin/main --quiet; then
+        after="$(git -C "${INSTALL_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)"
+        if [[ "${before}" != "${after}" ]]; then
+            log "Updated: ${before:0:7} -> ${after:0:7}"
+        else
+            log "Already up to date (${after:0:7})."
+        fi
+    else
+        err "git update failed (see error output above) — the version on disk was NOT changed."
+        die "Fix the git error, or delete ${INSTALL_DIR} and re-run this installer to get a clean clone."
+    fi
 elif [[ -e "${INSTALL_DIR}" ]]; then
     die "Path ${INSTALL_DIR} already exists but is not a git repo.
 Remove it, or re-run this script with a different path, e.g.:
@@ -67,6 +82,15 @@ ln -sf "${INSTALL_DIR}/rmserver.sh" "${BIN_LINK}"
 
 if ! command -v rmmonitor >/dev/null 2>&1; then
     warn "/usr/local/bin doesn't seem to be in PATH — either run with the full path (${BIN_LINK}) or add /usr/local/bin to your PATH."
+fi
+
+# ── restart the Core service if it's already installed & running ──
+# Updating the files on disk does nothing for a systemd service that's
+# already running the old process in memory — it has to be restarted
+# to actually pick up the new code.
+if command -v systemctl >/dev/null 2>&1 && [[ -f /etc/systemd/system/monitorbot-core.service ]]; then
+    log "Restarting the running monitorbot-core service to load the new code..."
+    systemctl restart monitorbot-core || warn "Could not restart monitorbot-core — check: journalctl -u monitorbot-core -n 50"
 fi
 
 echo ""
