@@ -87,6 +87,7 @@ class SSHDeployIn(BaseModel):
     ssh_password: Optional[str] = None
     ssh_private_key: Optional[str] = None
     ssh_key_passphrase: Optional[str] = None
+    agent_port: int = 5100
 
 
 class SSHCredsIn(BaseModel):
@@ -216,7 +217,7 @@ async def api_deploy(payload: SSHDeployIn, _=Depends(_check_auth)):
     result = await asyncio.to_thread(
         deployer.deploy_agent_via_ssh,
         payload.ip, payload.ssh_port, payload.ssh_username,
-        payload.ssh_password, payload.ssh_private_key, payload.ssh_key_passphrase,
+        payload.ssh_password, payload.ssh_private_key, payload.ssh_key_passphrase, payload.agent_port,
     )
     if not result["ok"]:
         raise HTTPException(status_code=502, detail=_fmt_error_with_log(result["error"] or "نصب ناموفق بود", result.get("log"), result.get("hint")))
@@ -253,7 +254,7 @@ async def api_uninstall(server_id: int, payload: Optional[SSHCredsIn] = None, _=
 
     result = await asyncio.to_thread(
         deployer.uninstall_agent_via_ssh,
-        ssh_host, ssh_port, ssh_username, ssh_password, ssh_private_key, payload.ssh_key_passphrase,
+        ssh_host, ssh_port, ssh_username, ssh_password, ssh_private_key, payload.ssh_key_passphrase, server["port"],
     )
     if not result["ok"]:
         raise HTTPException(status_code=502, detail=_fmt_error_with_log(result["error"] or "حذف ناموفق بود", result.get("log"), result.get("hint")))
@@ -280,7 +281,7 @@ async def api_update_agents(_=Depends(_check_auth)):
             result = await asyncio.to_thread(
                 deployer.update_agent_via_ssh,
                 server["ssh_host"], server["ssh_port"] or 22, server["ssh_username"],
-                server["ssh_password"], server["ssh_key"],
+                server["ssh_password"], server["ssh_key"], None, server["port"],
             )
             return server["name"], result
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 import io
 import logging
 import re
+import shlex
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -121,12 +122,22 @@ def _connect(
 def _run_script_via_stdin(
     client: paramiko.SSHClient, script_text: str, args: str = "",
     is_root: bool = False, hard_timeout: float = None,
+    env_vars: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     hard_timeout = hard_timeout or config.SSH_INSTALL_TIMEOUT
     # اگر کاربر root نیست، با sudo غیرتعاملی اجرا کن — اگر sudo رمز
     # بخواهد، sudo -n فوراً fail می‌شود (به‌جای هنگ‌کردن روی پرامپت رمز)
-    prefix = "bash -s --" if is_root else "sudo -n bash -s --"
-    command = f"{prefix} {args}".strip()
+    parts = [] if is_root else ["sudo -n"]
+    if env_vars:
+        # با دستور env صریحاً متغیرها را ست می‌کنیم — بعد از sudo هم
+        # قابل‌اعتماد کار می‌کند (بر خلاف "sudo VAR=val" که sudo معمولاً
+        # محیط را پاک‌سازی می‌کند)
+        env_str = " ".join(f"{shlex.quote(str(k))}={shlex.quote(str(v))}" for k, v in env_vars.items())
+        parts.append(f"env {env_str}")
+    parts.append("bash -s --")
+    if args:
+        parts.append(args)
+    command = " ".join(parts)
 
     transport = client.get_transport()
     channel = transport.open_session(timeout=config.SSH_CONNECT_TIMEOUT)
@@ -186,7 +197,7 @@ def deploy_agent_via_ssh(
 
     try:
         is_root = ssh_username.strip().lower() == "root"
-        result = _run_script_via_stdin(client, script, args="", is_root=is_root)
+        result = _run_script_via_stdin(client, script, args="", is_root=is_root, env_vars={"AGENT_PORT": agent_port})
     except TimeoutError as e:
         return {"ok": False, "error": str(e), "token": None, "agent_port": None, "log": ""}
     except Exception as e:
@@ -230,12 +241,16 @@ def deploy_agent_via_ssh(
 def update_agent_via_ssh(
     ip: str, ssh_port: int, ssh_username: str,
     ssh_password: Optional[str] = None, ssh_private_key: Optional[str] = None,
-    ssh_key_passphrase: Optional[str] = None,
+    ssh_key_passphrase: Optional[str] = None, agent_port: int = None,
 ) -> Dict[str, Any]:
     """
     اجرای install.sh --update روی سرور هدف — کد/پکیج‌های ایجنت و
     سرویس systemd را تازه می‌کند بدون اینکه توکن موجود (و در نتیجه
     ثبت سرور در دیتابیس مرکزی) را خراب کند.
+
+    agent_port را حتماً بده (پورت فعلیِ همین سرور طبق دیتابیس) — وگرنه
+    install.sh با پیش‌فرض 5100 اجرا می‌شود و .env را با همان پورت
+    بازنویسی می‌کند، حتی اگر این سرور از قبل روی پورت دیگری تنظیم شده باشد.
     """
     try:
         script = _load_install_script()
@@ -251,7 +266,8 @@ def update_agent_via_ssh(
 
     try:
         is_root = ssh_username.strip().lower() == "root"
-        result = _run_script_via_stdin(client, script, args="--update", is_root=is_root)
+        env_vars = {"AGENT_PORT": agent_port} if agent_port else None
+        result = _run_script_via_stdin(client, script, args="--update", is_root=is_root, env_vars=env_vars)
     except TimeoutError as e:
         return {"ok": False, "error": str(e), "log": ""}
     except Exception as e:
@@ -276,9 +292,10 @@ def update_agent_via_ssh(
 def uninstall_agent_via_ssh(
     ip: str, ssh_port: int, ssh_username: str,
     ssh_password: Optional[str] = None, ssh_private_key: Optional[str] = None,
-    ssh_key_passphrase: Optional[str] = None,
+    ssh_key_passphrase: Optional[str] = None, agent_port: int = None,
 ) -> Dict[str, Any]:
-    """اجرای install.sh --uninstall روی سرور هدف."""
+    """اجرای install.sh --uninstall روی سرور هدف. agent_port فقط برای
+    چک نهاییِ «پورت واقعاً آزاد شد یا نه» استفاده می‌شود."""
     try:
         script = _load_install_script()
     except FileNotFoundError as e:
@@ -293,7 +310,8 @@ def uninstall_agent_via_ssh(
 
     try:
         is_root = ssh_username.strip().lower() == "root"
-        result = _run_script_via_stdin(client, script, args="--uninstall", is_root=is_root)
+        env_vars = {"AGENT_PORT": agent_port} if agent_port else None
+        result = _run_script_via_stdin(client, script, args="--uninstall", is_root=is_root, env_vars=env_vars)
     except TimeoutError as e:
         return {"ok": False, "error": str(e), "log": ""}
     except Exception as e:

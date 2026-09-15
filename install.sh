@@ -458,13 +458,17 @@ setup_venv_and_service() {
     fi
     if [[ -z "${token}" ]]; then
         token="$(generate_token)"
-        cat > "${INSTALL_DIR}/.env" <<ENV_EOF
+    fi
+    # همیشه .env را با AGENT_PORT فعلی بازنویسی می‌کنیم (نه فقط اولین
+    # بار) — وگرنه اگر کسی بخواهد پورت یک نصب موجود را از راه متغیر
+    # محیطی AGENT_PORT عوض کند، مسیر آپدیت بی‌سروصدا نادیده‌اش می‌گرفت
+    # و همیشه پورت قدیمی توی .env می‌ماند.
+    cat > "${INSTALL_DIR}/.env" <<ENV_EOF
 AGENT_TOKEN=${token}
 AGENT_PORT=${AGENT_PORT}
 AGENT_TOP_N=5
 ENV_EOF
-        chmod 600 "${INSTALL_DIR}/.env"
-    fi
+    chmod 600 "${INSTALL_DIR}/.env"
 
     if command -v systemctl >/dev/null 2>&1; then
         log "ساخت/به‌روزرسانی systemd service..."

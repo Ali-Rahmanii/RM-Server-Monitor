@@ -31,8 +31,8 @@ logger = logging.getLogger("monitorbot.bot")
 
 # ── conversation states ──
 (ADD_M_NAME, ADD_M_IP, ADD_M_PORT, ADD_M_TOKEN, ADD_M_GROUP,
- ADD_S_NAME, ADD_S_IP, ADD_S_PORT, ADD_S_USER, ADD_S_AUTH, ADD_S_GROUP,
- CUSTOM_INTERVAL, CUSTOM_SUMMARY, RESTORE_FILE) = range(14)
+ ADD_S_NAME, ADD_S_IP, ADD_S_PORT, ADD_S_USER, ADD_S_AUTH, ADD_S_AGENT_PORT, ADD_S_GROUP,
+ CUSTOM_INTERVAL, CUSTOM_SUMMARY, RESTORE_FILE) = range(15)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -381,7 +381,7 @@ async def _run_uninstall(server) -> dict:
     return await asyncio.to_thread(
         deployer.uninstall_agent_via_ssh,
         server["ssh_host"], server["ssh_port"] or 22, server["ssh_username"],
-        server["ssh_password"], server["ssh_key"],
+        server["ssh_password"], server["ssh_key"], None, server["port"],
     )
 
 
@@ -494,6 +494,23 @@ async def add_ssh_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     else:
         context.user_data["ssh_password"] = text
         context.user_data["ssh_private_key"] = None
+    await update.message.reply_text(
+        "Send the <b>agent port</b> (default 5100 — send - to keep default; only change this if 5100 is blocked on the target):",
+        parse_mode=ParseMode.HTML, reply_markup=kb_cancel_flow(),
+    )
+    return ADD_S_AGENT_PORT
+
+
+async def add_ssh_agent_port(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    text = update.message.text.strip()
+    if text == "-" or not text:
+        context.user_data["agent_port"] = 5100
+    else:
+        try:
+            context.user_data["agent_port"] = int(text)
+        except ValueError:
+            await update.message.reply_text("Please send a valid port number, or - for default:", reply_markup=kb_cancel_flow())
+            return ADD_S_AGENT_PORT
     await update.message.reply_text("Send a <b>group name</b> (or send - to skip):", parse_mode=ParseMode.HTML, reply_markup=kb_cancel_flow())
     return ADD_S_GROUP
 
@@ -512,6 +529,7 @@ async def add_ssh_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     result = await asyncio.to_thread(
         deployer.deploy_agent_via_ssh,
         d["ip"], d["ssh_port"], d["ssh_username"], d.get("ssh_password"), d.get("ssh_private_key"),
+        None, d.get("agent_port", 5100),
     )
     if not result["ok"]:
         await msg.edit_text(_fmt_error_with_log("❌ Install failed", result["error"], result.get("log"), result.get("hint")), parse_mode=ParseMode.HTML)
@@ -654,6 +672,7 @@ def build_bot_application() -> Optional[Application]:
             ADD_S_PORT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_ssh_port)],
             ADD_S_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_ssh_user)],
             ADD_S_AUTH: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_ssh_auth)],
+            ADD_S_AGENT_PORT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_ssh_agent_port)],
             ADD_S_GROUP: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_ssh_group)],
         },
         fallbacks=[cancel_fallback, CommandHandler("cancel", cmd_cancel)],

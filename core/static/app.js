@@ -306,6 +306,7 @@ el("btn-deploy-server").onclick = () => {
     deployForm.reset();
     el("d-ssh-port").value = 22;
     el("d-ssh-user").value = "root";
+    el("d-agent-port").value = 5100;
     el("deploy-status").classList.add("hidden");
     el("btn-deploy-submit").disabled = false;
     el("btn-deploy-submit").textContent = "شروع نصب";
@@ -345,6 +346,7 @@ deployForm.onsubmit = async (ev) => {
         group_name: el("d-group").value.trim(),
         ssh_port: parseInt(el("d-ssh-port").value, 10),
         ssh_username: el("d-ssh-user").value.trim(),
+        agent_port: parseInt(el("d-agent-port").value, 10) || 5100,
         ssh_password: usingKey ? null : orNull(el("d-ssh-pass").value),
         ssh_private_key: usingKey ? orNull(el("d-ssh-key").value) : null,
         ssh_key_passphrase: usingKey ? orNull(el("d-ssh-key-pass").value) : null,
